@@ -276,7 +276,7 @@ impl ClientCommandSender {
 
     pub async fn subscribe(&self, ri: ShvRI) -> Result<Subscriber, CallRpcMethodError> {
         let subscription_id = next_subscription_id();
-        let (notifications_tx, mut notifications_rx) = futures::channel::mpsc::unbounded();
+        let (notifications_tx, notifications_rx) = futures::channel::mpsc::unbounded();
 
         let make_error = |error_kind: CallRpcMethodErrorKind| {
             CallRpcMethodError::new("", METH_SUBSCRIBE, error_kind)
@@ -293,8 +293,17 @@ impl ClientCommandSender {
             )
             .map_err(|_| make_error(ConnectionClosed))?;
 
+        // The Subscriber is created at this point, because if an error occurs during the subscriber
+        // response processing below, the drop() on Subscriber will send ClientCommand::Unsubscribe.
+        let mut subscriber = Subscriber {
+            notifications_rx,
+            client_cmd_tx: self.sender.clone(),
+            ri,
+            subscription_id
+        };
+
         // Wait for the subscribe response
-        notifications_rx
+        subscriber.notifications_rx
             .next()
             .await
             .ok_or_else(|| make_error(ConnectionClosed))?
@@ -303,14 +312,7 @@ impl ClientCommandSender {
             .result()
             .map_err(|e| make_error(RpcError(e)))?;
 
-        Ok(
-            Subscriber {
-                notifications_rx,
-                client_cmd_tx: self.sender.clone(),
-                ri,
-                subscription_id
-            }
-        )
+        Ok(subscriber)
     }
 }
 
@@ -449,6 +451,8 @@ impl<T: ?Sized> From<Arc<T>> for AppState<T> {
 
 #[derive(Debug)]
 struct SubscriptionEntry {
+    /// Notifications can be forwarded to the subscriber (the subscription response has been received)
+    confirmed: bool,
     subscr_id: u64,
     glob: Glob,
     sender: Sender<RpcFrame>,
@@ -538,7 +542,7 @@ impl Subscriptions {
         let opt_subscription_request = subscribed_new_ri.then(||
             create_subscription_request(&ri, SubscriptionRequest::Subscribe, api_version)
         );
-        subscriptions.push(SubscriptionEntry { subscr_id, glob, sender, });
+        subscriptions.push(SubscriptionEntry { confirmed: false, subscr_id, glob, sender, });
         Ok(opt_subscription_request)
     }
 
@@ -744,6 +748,11 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                             if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response() {
                                                 if let Ok(frame) = response.set_result(()).to_frame() {
                                                     notifications_tx.unbounded_send(frame).unwrap_or_default();
+                                                    if let Some(subscr) = subscriptions.0
+                                                        .iter_mut()
+                                                        .find(|subscr| subscr.subscr_id == subscription_id) {
+                                                            subscr.confirmed = true;
+                                                    }
                                                 }
                                             }
                                         }
@@ -953,8 +962,9 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                         warn!("Response channel closed before received response: {}", &frame);
                     }
                 } else if let Some(subscr_id) = subscription_requests.remove(&req_id) {
-                    if let Some(subscr) = subscriptions.0.iter().find(|s| s.subscr_id == subscr_id) {
+                    if let Some(subscr) = subscriptions.0.iter_mut().find(|s| s.subscr_id == subscr_id) {
                         send_subscription_frame(subscr, frame);
+                        subscr.confirmed = true;
                     }
                 }
             }
@@ -963,7 +973,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                 if let Ok(notification_ri) = ShvRI::from_path_method_signal(path, source.unwrap_or_default(), signal) {
                     if let Some(api_version) = api_version {
                         for subscr in &subscriptions.0 {
-                            if subscr.matches(&notification_ri, api_version) {
+                            if subscr.confirmed && subscr.matches(&notification_ri, api_version) {
                                 debug!("Send subscription frame: {frame:?}");
                                 send_subscription_frame(subscr, frame.clone());
                             }
@@ -1503,6 +1513,63 @@ mod tests {
             assert!(param.ttl.is_none());
         }
 
+        // Tests that notifications are forwarded to subscribers only for confirmed
+        // subscriptions — those that have received a response to their subscription request.
+        pub(super) async fn send_notifications_only_for_confirmed_subscriptions(
+            conn_evt_tx: Sender<ConnectionEvent>,
+            cli_cmd_tx: ClientCommandSender,
+            mut cli_evt_rx: ClientEventsReceiver,
+        ) {
+            let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
+            crate::runtime::spawn_task(async move {
+                // 1st subscription
+                let subscr_req_1 = conn_mock.expect_send_message()
+                    .timeout(Duration::from_millis(1000))
+                    .await
+                    .expect("Subscribe request timeout");
+
+                // 1st subscription response
+                conn_mock.emulate_receive_response(&subscr_req_1, ());
+
+                // 2nd subscription
+                let subscr_req_2 = conn_mock.expect_send_message()
+                    .timeout(Duration::from_millis(1000))
+                    .await
+                    .expect("Subscribe request timeout");
+
+                // These signals should be passed only to the first subscriber; the second is
+                // still waiting for the subscription response.
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(42.into()));
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
+
+                // 2nd subscription response
+                conn_mock.emulate_receive_response(&subscr_req_2, ());
+
+                // These signals should be received by both subscribers.
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(43.into()));
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
+                }
+            );
+
+            let mut subscriber_1 = cli_cmd_tx
+                .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
+                .await
+                .expect("ClientCommand subscribe send");
+
+            let mut subscriber_2 = cli_cmd_tx
+                .subscribe(ShvRI::from_path_method_signal("path/to/*", "*", Some(SIG_CHNG)).unwrap())
+                .await
+                .expect("ClientCommand subscribe send");
+
+            check_notification_received(&mut subscriber_1, Some("path/to/resource"), Some(SIG_CHNG), Some(&42.into())).await;
+            check_notification_received(&mut subscriber_1, Some("path/to/resource"), Some(SIG_CHNG), Some(&"bar".into())).await;
+
+            check_notification_received(&mut subscriber_1, Some("path/to/resource"), Some(SIG_CHNG), Some(&43.into())).await;
+            check_notification_received(&mut subscriber_1, Some("path/to/resource"), Some(SIG_CHNG), Some(&"baz".into())).await;
+            check_notification_received(&mut subscriber_2, Some("path/to/resource"), Some(SIG_CHNG), Some(&43.into())).await;
+            check_notification_received(&mut subscriber_2, Some("path/to/resource"), Some(SIG_CHNG), Some(&"baz".into())).await;
+        }
+
         // Request handling tests
         //
         pub(super) fn make_client_with_handlers() -> Client<Full,()> {
@@ -1747,6 +1814,7 @@ mod tests {
         receive_subscribed_notification_v3,
         do_not_receive_unsubscribed_notification_v3,
         subscribe_and_unsubscribe_v3,
+        send_notifications_only_for_confirmed_subscriptions,
         handle_method_calls (make_client_with_handlers())
     }
 
