@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 
 [lib]
@@ -23,8 +23,8 @@ simple_logger = { version = "5.0.0", features = ["stderr"] }
 generics-alias = { git = "https://github.com/j4r0u53k/generics-alias-rs.git", branch = "main" }
 
 [dependencies]
-shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", branch = "master", version = "3.1.0" }
-shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", branch = "master", version = "3.1.0" }
+shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", branch = "master", version = "3.2" }
+shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", branch = "master", version = "3.2" }
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"

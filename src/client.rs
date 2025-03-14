@@ -13,6 +13,7 @@ use shvrpc::rpcframe::RpcFrame;
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode, RqId};
 use shvrpc::{RpcMessage, RpcMessageMetaTags};
 use shvproto::RpcValue;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -340,15 +341,17 @@ pub const BROKER_APP_NODE: &str = ".broker/app";
 pub const BROKER_CLIENT_NODE: &str = ".broker/client";
 pub const BROKER_CURRENT_CLIENT_NODE: &str = ".broker/currentClient";
 
+pub type MetaMethods = Cow<'static, [&'static MetaMethod]>;
+
 // The wrapping struct itself is descriptive
 #[allow(clippy::type_complexity)]
-pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, Option<AppState<T>>) -> BoxFuture<'static, Option<Vec<&'static MetaMethod>>> + Sync + Send>);
+pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
 
 impl<T> MethodsGetter<T> {
     pub fn new<F, Fut>(func: F) -> Self
     where
         F: Fn(String, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output=Option<Vec<&'static MetaMethod>>> + Send + 'static,
+        Fut: Future<Output=Option<MetaMethods>> + Send + 'static,
     {
         Self(Box::new(move |path, data| Box::pin(func(path, data))))
     }
@@ -1573,9 +1576,9 @@ mod tests {
         // Request handling tests
         //
         pub(super) fn make_client_with_handlers() -> Client<Full,()> {
-            async fn methods_getter(path: String, _: Option<AppState<()>>) -> Option<Vec<&'static MetaMethod>> {
+            async fn methods_getter(path: String, _: Option<AppState<()>>) -> Option<MetaMethods> {
                 if path.is_empty() {
-                    Some(PROPERTY_METHODS.iter().collect())
+                    Some(MetaMethods::from(&PROPERTY_METHODS))
                 } else {
                     None
                 }
@@ -1610,7 +1613,7 @@ mod tests {
                     MethodsGetter::new(methods_getter),
                     RequestHandler::stateless(request_handler))
                 .mount_fixed("static",
-                    PROPERTY_METHODS.iter(),
+                    PROPERTY_METHODS,
                     [Route::new([crate::clientnode::METH_GET, crate::clientnode::METH_SET],
                         RequestHandler::stateless(request_handler))])
         }
