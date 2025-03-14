@@ -8,6 +8,7 @@ use shvrpc::rpcdiscovery::{DirParam, LsParam};
 use shvrpc::rpcframe::RpcFrame;
 use shvrpc::{metamethod, RpcMessage, RpcMessageMetaTags};
 use shvproto::rpcvalue;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::format;
 use std::sync::Arc;
@@ -75,7 +76,7 @@ pub(crate) fn process_local_dir_ls<V>(
     if method == METH_DIR && !is_mount_point {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
-            let dir = dir(DIR_LS_METHODS.iter(), rpcmsg.param().into());
+            let dir = dir(DIR_LS_METHODS, rpcmsg.param().into());
             return Some(RequestResult::Response(dir));
         } else {
             return Some(RequestResult::Error(RpcError::new(
@@ -212,7 +213,7 @@ struct FixedNode<'a, T> {
 
 impl<'a, T> FixedNode<'a, T> {
     fn new(methods: impl IntoIterator<Item = &'a MetaMethod>, routes: impl IntoIterator<Item = Route<T>>) -> Self {
-        let methods = DIR_LS_METHODS.iter().chain(methods).collect::<Vec<&MetaMethod>>();
+        let methods = DIR_LS_METHODS.into_iter().chain(methods).collect::<Vec<&MetaMethod>>();
         let handlers = Self::add_routes(&methods, routes);
         Self {
             methods,
@@ -325,12 +326,16 @@ impl<'a, T: Sync + Send + 'static> ClientNode<'a, T> {
                 spawn_task(async move {
                     let methods = node.methods.0(shv_path, app_state.clone()).await
                         .map_or_else(
-                            Vec::new,
-                            |m| DIR_LS_METHODS.iter().chain(m).collect());
+                            || Cow::from(&[]),
+                            |m| if m.is_empty() {
+                                Cow::from(&DIR_LS_METHODS)
+                            } else {
+                                DIR_LS_METHODS.into_iter().chain(m.iter().copied()).collect()
+                            });
                     if resolve_request_access(&request, &mount_path, &client_cmd_tx, &methods) {
                         match request.method() {
                             Some(self::METH_DIR) => {
-                                let result = dir(methods.into_iter(), request.param().into());
+                                let result = dir(methods.iter().copied(), request.param().into());
                                 send_response(request, client_cmd_tx, Ok(result));
                             }
                             Some(_) =>
@@ -343,11 +348,11 @@ impl<'a, T: Sync + Send + 'static> ClientNode<'a, T> {
             },
             NodeVariant::Constant(node) => {
                 let methods = if request.shv_path().unwrap_or_default().is_empty() {
-                    DIR_LS_METHODS.iter().chain(node.methods()).collect()
+                    DIR_LS_METHODS.into_iter().chain(node.methods()).collect()
                 } else {
                     // Static nodes do not have any own children. Any child nodes are
                     // resolved on the mounts tree level in `process_local_dir_ls()`.
-                    vec![]
+                    Cow::from(&[])
                 };
                 if resolve_request_access(&request, &mount_path, &client_cmd_tx, &methods) {
                     let Some(method) = request.method() else {
@@ -450,8 +455,8 @@ pub const METH_SET: &str = "set";
 pub const SIG_CHNG: &str = "chng";
 pub const METH_PING: &str = "ping";
 
-pub(crate) const DIR_LS_METHODS: [MetaMethod; 2] = [
-    MetaMethod {
+pub(crate) const DIR_LS_METHODS: [&MetaMethod; 2] = [
+    &MetaMethod {
         name: METH_DIR,
         flags: Flag::None as u32,
         access: AccessLevel::Browse,
@@ -460,7 +465,7 @@ pub(crate) const DIR_LS_METHODS: [MetaMethod; 2] = [
         signals: &[],
         description: "",
     },
-    MetaMethod {
+    &MetaMethod {
         name: METH_LS,
         flags: Flag::None as u32,
         access: AccessLevel::Browse,
@@ -468,10 +473,10 @@ pub(crate) const DIR_LS_METHODS: [MetaMethod; 2] = [
         result: "LsResult",
         signals: &[],
         description: "",
-    },
+    }
 ];
-pub const PROPERTY_METHODS: [MetaMethod; 3] = [
-    MetaMethod {
+
+pub const META_METHOD_GET: MetaMethod = MetaMethod {
         name: METH_GET,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Read,
@@ -479,8 +484,9 @@ pub const PROPERTY_METHODS: [MetaMethod; 3] = [
         result: "",
         signals: &[],
         description: "",
-    },
-    MetaMethod {
+    };
+
+pub const META_METHOD_SET: MetaMethod = MetaMethod {
         name: METH_SET,
         flags: Flag::IsSetter as u32,
         access: AccessLevel::Write,
@@ -488,8 +494,9 @@ pub const PROPERTY_METHODS: [MetaMethod; 3] = [
         result: "",
         signals: &[],
         description: "",
-    },
-    MetaMethod {
+    };
+
+pub const META_METHOD_SIG_CHNG: MetaMethod = MetaMethod {
         name: SIG_CHNG,
         flags: Flag::IsSignal as u32,
         access: AccessLevel::Read,
@@ -497,7 +504,12 @@ pub const PROPERTY_METHODS: [MetaMethod; 3] = [
         result: "",
         signals: &[],
         description: "",
-    },
+    };
+
+pub const PROPERTY_METHODS: [&MetaMethod; 3] = [
+    &META_METHOD_GET,
+    &META_METHOD_SET,
+    &META_METHOD_SIG_CHNG,
 ];
 
 
@@ -541,46 +553,67 @@ mod tests {
 
     #[test]
     fn accept_valid_routes() {
-        ClientNode::fixed(&PROPERTY_METHODS,
-                            vec![Route::new([METH_GET, METH_SET, METH_LS], RequestHandler::stateful(dummy_handler))]);
+        ClientNode::fixed(PROPERTY_METHODS,
+                            [Route::new([METH_GET, METH_SET, METH_LS], RequestHandler::stateful(dummy_handler))]);
     }
 
     #[test]
     fn accept_valid_routes_without_ls() {
-        ClientNode::fixed(&PROPERTY_METHODS,
-                            vec![Route::new([METH_GET, METH_SET], RequestHandler::stateful(dummy_handler))]);
+        ClientNode::fixed(PROPERTY_METHODS,
+                            [Route::new([METH_GET, METH_SET], RequestHandler::stateful(dummy_handler))]);
     }
 
     #[test]
     #[should_panic]
     fn reject_sig_chng_route() {
-        ClientNode::fixed(&PROPERTY_METHODS,
-                            vec![Route::new([METH_GET, METH_SET, METH_LS, SIG_CHNG], RequestHandler::stateful(dummy_handler))]);
+        ClientNode::fixed(PROPERTY_METHODS,
+                            [Route::new([METH_GET, METH_SET, METH_LS, SIG_CHNG], RequestHandler::stateful(dummy_handler))]);
     }
 
     #[test]
     #[should_panic]
     fn reject_custom_dir_handler() {
-        ClientNode::fixed(&PROPERTY_METHODS,
-                            vec![Route::new([METH_GET, METH_SET, METH_DIR], RequestHandler::stateful(dummy_handler))]);
+        ClientNode::fixed(PROPERTY_METHODS,
+                            [Route::new([METH_GET, METH_SET, METH_DIR], RequestHandler::stateful(dummy_handler))]);
     }
 
     #[test]
     #[should_panic]
     fn reject_invalid_method_route() {
-        ClientNode::fixed(&PROPERTY_METHODS, vec![Route::new(["invalidMethod"], RequestHandler::stateful(dummy_handler))]);
+        ClientNode::fixed(PROPERTY_METHODS, [Route::new(["invalidMethod"], RequestHandler::stateful(dummy_handler))]);
     }
 
     #[test]
     #[should_panic]
     fn reject_unhandled_method() {
-        ClientNode::fixed(&PROPERTY_METHODS, vec![Route::new([METH_GET], RequestHandler::stateful(dummy_handler))]);
+        ClientNode::fixed(PROPERTY_METHODS, [Route::new([METH_GET], RequestHandler::stateful(dummy_handler))]);
     }
 
     #[test]
     #[should_panic]
     fn reject_duplicate_method() {
-        let duplicate_methods = PROPERTY_METHODS.iter().chain(DIR_LS_METHODS.iter());
-        ClientNode::fixed(duplicate_methods, vec![Route::new([METH_GET, METH_SET, METH_LS], RequestHandler::stateful(dummy_handler))]);
+        let duplicate_methods = PROPERTY_METHODS.into_iter().chain(DIR_LS_METHODS);
+        ClientNode::fixed(duplicate_methods, [Route::new([METH_GET, METH_SET, METH_LS], RequestHandler::stateful(dummy_handler))]);
+    }
+
+    #[test]
+    fn create_fixed_node() {
+        let node: crate::clientnode::ClientNode<'_, ()> = crate::fixed_node!{
+            device_handler(request, _tx) {
+                "echo" [IsGetter, Browse, "", ""] (param: i32) => {
+                    Some(Ok(param.into()))
+                }
+            }
+        };
+
+        let NodeVariant::Fixed(FixedNode { methods, handlers }) = node.0 else {
+            panic!("Not a fixed node");
+        };
+        assert_eq!(methods.len(), 3, "Expected 3 methods");
+        assert_eq!(methods[0].name, "dir");
+        assert_eq!(methods[1].name, "ls");
+        assert_eq!(methods[2].name, "echo");
+        assert_eq!(handlers.len(), 1, "Expected 1 handler");
+
     }
 }
