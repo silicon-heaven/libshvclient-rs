@@ -117,10 +117,11 @@ fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> Reque
         },
     }
 }
-pub(crate) fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: &str) -> Option<Vec<String>> {
+pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: impl AsRef<str>) -> Option<Vec<String>> {
+    let path = path.as_ref();
     let mut dirs: Vec<String> = Vec::new();
     let mut unique_dirs: HashSet<String> = HashSet::new();
-    let mut dir_exists = false;
+    let mut dir_exists = mounts.contains_key(path);
     for (key, _) in mounts.range(path.to_owned()..) {
         if key.starts_with(path) {
             if path.is_empty() || (key.len() > path.len() && key.as_bytes()[path.len()] == (b'/')) {
@@ -537,7 +538,7 @@ mod tests {
         );
         assert_eq!(
             super::children_on_path(&mounts, "a/1"),
-            None
+            Some(vec![])
         );
         assert_eq!(
             super::children_on_path(&mounts, "a/xy"),
