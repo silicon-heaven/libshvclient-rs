@@ -187,12 +187,12 @@ pub fn find_longest_path_prefix<'a, V>(
     None
 }
 
-pub struct Route<T> {
+pub struct Route<T: AppState> {
     pub handler: RequestHandler<T>,
     pub methods: Vec<String>,
 }
 
-impl<T> Route<T> {
+impl<T: AppState> Route<T> {
     pub fn new<I>(methods: I, handler: RequestHandler<T>) -> Self
     where
         I: IntoIterator,
@@ -207,12 +207,12 @@ impl<T> Route<T> {
 
 type StaticNodeHandlers<T> = BTreeMap<String, Arc<RequestHandler<T>>>;
 
-struct FixedNode<'a, T> {
+struct FixedNode<'a, T: AppState> {
     methods: Vec<&'a MetaMethod>,
     handlers: StaticNodeHandlers<T>,
 }
 
-impl<'a, T> FixedNode<'a, T> {
+impl<'a, T: AppState> FixedNode<'a, T> {
     fn new(methods: impl IntoIterator<Item = &'a MetaMethod>, routes: impl IntoIterator<Item = Route<T>>) -> Self {
         let methods = DIR_LS_METHODS.into_iter().chain(methods).collect::<Vec<&MetaMethod>>();
         let handlers = Self::add_routes(&methods, routes);
@@ -253,7 +253,7 @@ impl<'a, T> FixedNode<'a, T> {
     }
 }
 
-struct DynamicNode<T> {
+struct DynamicNode<T: AppState> {
     methods: MethodsGetter<T>,
     handler: RequestHandler<T>,
 }
@@ -266,15 +266,15 @@ pub trait ConstantNode {
 // NOTE: Implementing Steady and Dynamic nodes using async trait would allow to
 // remove Constant variant. Steady node would have only one handler for the whole node.
 
-enum NodeVariant<'a, T> {
+enum NodeVariant<'a, T: AppState> {
     Fixed(FixedNode<'a, T>),
     Dynamic(Arc<DynamicNode<T>>),
     Constant(Box<dyn ConstantNode + Send + Sync>),
 }
 
-pub struct ClientNode<'a, T>(NodeVariant<'a, T>);
+pub struct ClientNode<'a, T: AppState>(NodeVariant<'a, T>);
 
-impl<'a, T: Sync + Send + 'static> ClientNode<'a, T> {
+impl<'a, T: AppState> ClientNode<'a, T> {
     pub fn fixed(methods: impl IntoIterator<Item = &'a MetaMethod>, routes: impl IntoIterator<Item = Route<T>>) -> Self {
         Self(NodeVariant::Fixed(FixedNode::new(methods, routes)))
     }
@@ -293,7 +293,7 @@ impl<'a, T: Sync + Send + 'static> ClientNode<'a, T> {
         Self(NodeVariant::Constant(Box::new(node)))
     }
 
-    pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender, app_state: &Option<AppState<T>>) {
+    pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender<T>, app_state: &Option<T>) {
         match &self.0 {
             NodeVariant::Fixed(node) => {
                 let methods = if request.shv_path().unwrap_or_default().is_empty() {
@@ -376,7 +376,7 @@ impl<'a, T: Sync + Send + 'static> ClientNode<'a, T> {
     }
 }
 
-fn resolve_request_access(request: &RpcMessage, mount_path: &String, client_cmd_tx: &ClientCommandSender, methods: &[&MetaMethod]) -> bool {
+fn resolve_request_access<T: AppState>(request: &RpcMessage, mount_path: &String, client_cmd_tx: &ClientCommandSender<T>, methods: &[&MetaMethod]) -> bool {
 
     let shv_path = request.shv_path().unwrap_or_default();
     let check_request_access = || {
@@ -424,7 +424,7 @@ fn resolve_request_access(request: &RpcMessage, mount_path: &String, client_cmd_
     false
 }
 
-pub fn send_response(request: RpcMessage, client_cmd_tx: ClientCommandSender, result: Result<RpcValue, RpcError>) {
+pub fn send_response<T: AppState>(request: RpcMessage, client_cmd_tx: ClientCommandSender<T>, result: Result<RpcValue, RpcError>) {
     match request.prepare_response() {
         Err(err) => {
             error!("Cannot prepare response. Error: {err}, request: {request}");
@@ -550,7 +550,7 @@ mod tests {
         );
     }
 
-    async fn dummy_handler(_: RpcMessage, _: ClientCommandSender, _: Option<AppState<()>>) {}
+    async fn dummy_handler(_: RpcMessage, _: ClientCommandSender<()>, _: Option<()>) {}
 
     #[test]
     fn accept_valid_routes() {
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn create_fixed_node() {
         let node: crate::clientnode::ClientNode<'_, ()> = crate::fixed_node!{
-            device_handler(request, _tx) {
+            device_handler<()>(request, _tx) {
                 "echo" [IsGetter, Browse, "", ""] (param: i32) => {
                     Some(Ok(param.into()))
                 }

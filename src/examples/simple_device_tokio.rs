@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use shvclient::appnodes::DotAppNode;
 use shvclient::client::MetaMethods;
 use tokio::sync::RwLock;
@@ -79,15 +81,18 @@ fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
     Ok(config)
 }
 
-type State = RwLock<i32>;
+#[derive(Clone)]
+struct State(Arc<RwLock<i32>>);
+
+impl AppState for State { }
 
 async fn emit_chng_task(
-    client_cmd_tx: ClientCommandSender,
+    client_cmd_tx: ClientCommandSender<State>,
     client_evt_rx: ClientEventsReceiver,
-    app_state: AppState<State>,
+    app_state: State,
 ) -> shvrpc::Result<()> {
     info!("signal task started");
-
+    let State(app_state) = app_state;
     let mut client_evt_rx = client_evt_rx.fuse();
     let mut cnt = 0;
     let mut emit_signal = true;
@@ -100,6 +105,15 @@ async fn emit_chng_task(
                 Some(ClientEvent::Connected(_)) => {
                     emit_signal = true;
                     info!("Device connected");
+
+                    client_cmd_tx.mount_node("onfly", shvclient::fixed_node! {
+                        device_handler<State>(request, _tx ) {
+                            "echo" [IsGetter, Browse, "", ""] (param: RpcValue) => {
+                                println!("echo: {}", param);
+                                Some(Ok(param))
+                            }
+                        }
+                    });
                 },
                 Some(ClientEvent::Disconnected) => {
                     emit_signal = false;
@@ -118,7 +132,10 @@ async fn emit_chng_task(
         }
         let state = app_state.read().await;
         info!("state: {state}");
-        if cnt == 5 {
+        if cnt == 10 {
+            client_cmd_tx.unmount_node("onfly");
+        }
+        if cnt == 20 {
             client_cmd_tx.terminate_client();
         }
     }
@@ -144,21 +161,21 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
 
     let client_config = load_client_config(cli_opts).expect("Invalid config");
 
-    let counter = AppState::new(RwLock::new(-10));
+    let counter = State(Arc::new(RwLock::new(-10)));
     let cnt = counter.clone();
 
     let app_tasks = move |client_cmd_tx, client_evt_rx| {
         tokio::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
     };
 
-    async fn dyn_methods_getter(_path: String, _: Option<AppState<RwLock<i32>>>) -> Option<MetaMethods> {
+    async fn dyn_methods_getter(_path: String, _: Option<State>) -> Option<MetaMethods> {
         Some(MetaMethods::from(&PROPERTY_METHODS))
     }
-    async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender) {
+    async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender<State>) {
     }
 
     let stateless_node = shvclient::fixed_node!{
-        device_handler(request, _tx ) {
+        device_handler<State>(request, _tx ) {
             "something" [IsGetter, Browse, "", ""] (param: i32) => {
                 println!("param: {}", param);
                 Some(Ok(RpcValue::from("name result")))
@@ -197,11 +214,11 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
     };
 
     let delay_node = shvclient::fixed_node!(
-        delay_handler(request, client_cmd_tx, app_state: State) {
+        delay_handler<State>(request, client_cmd_tx, app_state) {
             "getDelayed" [None, Browse, "", ""] { ("delayedmod", None) } => {
                 let mut resp = request.prepare_response().unwrap_or_default();
                 tokio::task::spawn(async move {
-                    let mut counter = app_state
+                    let mut counter = app_state.0
                         .write()
                         .await;
                     let ret_val = {

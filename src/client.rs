@@ -17,7 +17,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
 
 const METH_SUBSCRIBE: &str = "subscribe";
 const METH_UNSUBSCRIBE: &str = "unsubscribe";
@@ -38,15 +37,15 @@ mod private {
 }
 use private::next_subscription_id;
 
-pub struct Subscriber {
+pub struct Subscriber<T: AppState> {
     notifications_rx: Receiver<RpcFrame>,
     // For unsubscribe on drop
-    client_cmd_tx: Sender<ClientCommand>,
+    client_cmd_tx: Sender<ClientCommand<T>>,
     ri: ShvRI,
     subscription_id: u64,
 }
 
-impl Subscriber {
+impl<T: AppState> Subscriber<T> {
     pub fn path_signal(&self) -> (&str, &str) {
         (self.ri.path(), self.ri.signal().unwrap_or("*"))
     }
@@ -55,7 +54,7 @@ impl Subscriber {
     }
 }
 
-impl futures::Stream for Subscriber {
+impl<T: AppState> futures::Stream for Subscriber<T> {
     type Item = RpcFrame;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
@@ -67,7 +66,7 @@ impl futures::Stream for Subscriber {
     }
 }
 
-impl Drop for Subscriber {
+impl<T: AppState> Drop for Subscriber<T> {
     fn drop(&mut self) {
         if let Err(err) = self.client_cmd_tx.unbounded_send(
             ClientCommand::Unsubscribe { subscription_id: self.subscription_id, }) {
@@ -138,15 +137,27 @@ impl std::fmt::Display for CallRpcMethodError {
 }
 
 #[derive(Clone)]
-pub struct ClientCommandSender {
-    pub(crate) sender: Sender<ClientCommand>,
+pub struct ClientCommandSender<T: AppState> {
+    pub(crate) sender: Sender<ClientCommand<T>>,
 }
 
-impl ClientCommandSender {
+impl<T: AppState> ClientCommandSender<T> {
     pub fn terminate_client(&self) {
         self.sender
             .unbounded_send(ClientCommand::TerminateClient)
             .unwrap_or_else(|e| error!("Failed to send TerminateClient command: {e}"));
+    }
+
+    pub fn mount_node(&self, path: impl AsRef<str>, node: ClientNode<'static, T>) {
+        self.sender
+            .unbounded_send(ClientCommand::MountNode { path: path.as_ref().into(), node })
+            .unwrap_or_else(|e| error!("Failed to send MountNode command: {e}"));
+    }
+
+    pub fn unmount_node(&self, path: impl AsRef<str>) {
+        self.sender
+            .unbounded_send(ClientCommand::UnmountNode { path: path.as_ref().into() })
+            .unwrap_or_else(|e| error!("Failed to send UnmountNode command: {e}"));
     }
 
     pub fn do_rpc_call_param<'a>(
@@ -154,7 +165,7 @@ impl ClientCommandSender {
         shvpath: impl Into<&'a str>,
         method: impl Into<&'a str>,
         param: Option<RpcValue>,
-    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand>>
+    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand<T>>>
     {
         let (response_sender, response_receiver) = futures::channel::mpsc::unbounded();
         self.sender.unbounded_send(ClientCommand::RpcCall {
@@ -168,7 +179,7 @@ impl ClientCommandSender {
         &self,
         shvpath: impl Into<&'a str>,
         method: impl Into<&'a str>,
-    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand>>
+    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand<T>>>
     {
         self.do_rpc_call_param(shvpath, method, None)
     }
@@ -189,15 +200,15 @@ impl ClientCommandSender {
         self.call_dir_into(path, DirParam::Exists(method.into())).await
     }
 
-    async fn call_dir_into<T, E>(&self, path: &str, param: DirParam) -> Result<T, CallRpcMethodError>
+    async fn call_dir_into<R, E>(&self, path: &str, param: DirParam) -> Result<R, CallRpcMethodError>
     where
-        T: TryFrom<DirResult, Error = E>,
+        R: TryFrom<DirResult, Error = E>,
         E: std::fmt::Display,
     {
         self.call_rpc_method(path, METH_DIR, Some(RpcValue::from(param)))
             .await
             .and_then(|dir_res|
-                T::try_from(dir_res).map_err(|e|
+                R::try_from(dir_res).map_err(|e|
                     CallRpcMethodError::new(
                         path,
                         METH_DIR,
@@ -219,15 +230,15 @@ impl ClientCommandSender {
         self.call_ls_into(path, LsParam::List).await
     }
 
-    async fn call_ls_into<T, E>(&self, path: &str, param: LsParam) -> Result<T, CallRpcMethodError>
+    async fn call_ls_into<R, E>(&self, path: &str, param: LsParam) -> Result<R, CallRpcMethodError>
     where
-        T: TryFrom<LsResult, Error = E>,
+        R: TryFrom<LsResult, Error = E>,
         E: std::fmt::Display,
     {
         self.call_rpc_method(path, METH_LS, Some(RpcValue::from(param)))
             .await
             .and_then(|ls_res|
-                T::try_from(ls_res).map_err(|e|
+                R::try_from(ls_res).map_err(|e|
                     CallRpcMethodError::new(
                         path,
                         METH_LS,
@@ -237,14 +248,14 @@ impl ClientCommandSender {
             )
     }
 
-    pub async fn call_rpc_method<T, E>(
+    pub async fn call_rpc_method<R, E>(
         &self,
         path: &str,
         method: &str,
         param: Option<RpcValue>,
-    ) -> Result<T, CallRpcMethodError>
+    ) -> Result<R, CallRpcMethodError>
     where
-        T: TryFrom<RpcValue, Error = E>,
+        R: TryFrom<RpcValue, Error = E>,
         E: std::fmt::Display,
     {
         let make_error = |error_kind: CallRpcMethodErrorKind| {
@@ -267,15 +278,15 @@ impl ClientCommandSender {
             .map_err(|e| make_error(RpcError(e)))
             .cloned()
             .and_then(|r|
-                T::try_from(r).map_err(|e| make_error(ResultTypeMismatch(e.to_string())))
+                R::try_from(r).map_err(|e| make_error(ResultTypeMismatch(e.to_string())))
             )
     }
 
-    pub fn send_message(&self, message: RpcMessage) -> Result<(), TrySendError<ClientCommand>> {
+    pub fn send_message(&self, message: RpcMessage) -> Result<(), TrySendError<ClientCommand<T>>> {
         self.sender.unbounded_send(ClientCommand::SendMessage { message })
     }
 
-    pub async fn subscribe(&self, ri: ShvRI) -> Result<Subscriber, CallRpcMethodError> {
+    pub async fn subscribe(&self, ri: ShvRI) -> Result<Subscriber<T>, CallRpcMethodError> {
         let subscription_id = next_subscription_id();
         let (notifications_tx, notifications_rx) = futures::channel::mpsc::unbounded();
 
@@ -318,7 +329,7 @@ impl ClientCommandSender {
 }
 
 
-pub enum ClientCommand {
+pub enum ClientCommand<T: AppState> {
     SendMessage {
         message: RpcMessage,
     },
@@ -334,6 +345,13 @@ pub enum ClientCommand {
     Unsubscribe {
         subscription_id: u64,
     },
+    MountNode  {
+        path: String,
+        node: ClientNode<'static, T>,
+    },
+    UnmountNode {
+        path: String,
+    },
     TerminateClient,
 }
 
@@ -345,13 +363,13 @@ pub type MetaMethods = Cow<'static, [&'static MetaMethod]>;
 
 // The wrapping struct itself is descriptive
 #[allow(clippy::type_complexity)]
-pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
+pub struct MethodsGetter<T: AppState>(pub(crate) Box<dyn Fn(String, Option<T>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
 
-impl<T> MethodsGetter<T> {
+impl<T: AppState> MethodsGetter<T> {
     pub fn new<F, Fut>(func: F) -> Self
     where
-        F: Fn(String, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output=Option<MetaMethods>> + Send + 'static,
+        F: Fn(String, Option<T>) -> Fut + Sync + Send + 'static,
+        Fut: Future<Output = Option<MetaMethods>> + Send + 'static,
     {
         Self(Box::new(move |path, data| Box::pin(func(path, data))))
     }
@@ -359,20 +377,20 @@ impl<T> MethodsGetter<T> {
 
 // The wrapping struct itself is descriptive
 #[allow(clippy::type_complexity)]
-pub struct RequestHandler<T>(pub(crate) Box<dyn Fn(RpcMessage, ClientCommandSender, Option<AppState<T>>) -> BoxFuture<'static, ()> + Sync + Send>);
+pub struct RequestHandler<T: AppState>(pub(crate) Box<dyn Fn(RpcMessage, ClientCommandSender<T>, Option<T>) -> BoxFuture<'static, ()> + Sync + Send>);
 
-impl<T> RequestHandler<T> {
+impl<T: AppState> RequestHandler<T> {
     pub fn stateful<F, Fut>(func: F) -> Self
     where
-        F: Fn(RpcMessage, ClientCommandSender, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output=()> + Send + 'static
+        F: Fn(RpcMessage, ClientCommandSender<T>, Option<T>) -> Fut + Sync + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static
     {
         Self(Box::new(move |req, tx, data| Box::pin(func(req, tx, data))))
     }
 
     pub fn stateless<F, Fut>(func: F) -> Self
     where
-        F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
+        F: Fn(RpcMessage, ClientCommandSender<T>) -> Fut + Sync + Send + 'static,
         Fut: Future<Output=()> + Send + 'static
     {
         Self(Box::new(move |req, tx, _data| Box::pin(func(req, tx))))
@@ -424,33 +442,7 @@ impl ClientEventsReceiver {
     }
 }
 
-pub struct AppState<T: ?Sized>(Arc<T>);
-
-impl<T> AppState<T> {
-    pub fn new(data: T) -> Self {
-        Self(Arc::new(data))
-    }
-}
-
-impl<T: ?Sized> std::ops::Deref for AppState<T> {
-    type Target = Arc<T>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T: ?Sized> Clone for AppState<T> {
-    fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0))
-    }
-}
-
-impl<T: ?Sized> From<Arc<T>> for AppState<T> {
-    fn from(value: Arc<T>) -> Self {
-        Self(value)
-    }
-}
-
+pub trait AppState: Clone + Sync + Send + 'static {}
 
 #[derive(Debug)]
 struct SubscriptionEntry {
@@ -574,11 +566,13 @@ pub enum Full { }
 impl ClientVariant for Full { }
 impl private::Sealed for Full { }
 
-pub struct Client<V: ClientVariant, T> {
+pub struct Client<V: ClientVariant, T: AppState> {
     mounts: BTreeMap<String, ClientNode<'static, T>>,
-    app_state: Option<AppState<T>>,
+    app_state: Option<T>,
     variant_marker: PhantomData<V>,
 }
+
+impl AppState for () { }
 
 impl Client<Plain, ()> {
     pub fn new_plain() -> Self {
@@ -590,7 +584,7 @@ impl Client<Plain, ()> {
     }
 }
 
-impl<T: Send + Sync + 'static> Client<Full, T> {
+impl<T: AppState> Client<Full, T> {
     pub fn new(app_node: crate::appnodes::DotAppNode) -> Self {
         let client = Self {
             mounts: Default::default(),
@@ -627,12 +621,12 @@ impl<T: Send + Sync + 'static> Client<Full, T> {
         self
     }
 
-    pub fn with_app_state(mut self, app_state: AppState<T>) -> Self {
+    pub fn with_app_state(mut self, app_state: T) -> Self {
         self.app_state = Some(app_state);
         self
     }
 
-    pub async fn run(self, config: &ClientConfig) -> shvrpc::Result<()> {
+    pub async fn run(mut self, config: &ClientConfig) -> shvrpc::Result<()> {
         self.run_with_init_opt(
             config,
             Option::<fn(_,_)>::None,
@@ -641,34 +635,34 @@ impl<T: Send + Sync + 'static> Client<Full, T> {
     }
 }
 
-impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
+impl<V: ClientVariant, T: AppState> Client<V, T> {
     async fn run_with_init_opt<H>(
-        &self,
+        &mut self,
         config: &ClientConfig,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
+        H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
     {
         let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
         spawn_connection_task(config, conn_evt_tx);
         self.client_loop(conn_evt_rx, init_handler).await
     }
 
-    pub async fn run_with_init<H>(self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
+    pub async fn run_with_init<H>(mut self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
+        H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
     {
         self.run_with_init_opt(config, Some(handler)).await
     }
 
     async fn client_loop<H>(
-        &self,
+        &mut self,
         mut conn_events_rx: Receiver<ConnectionEvent>,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
+        H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
     {
         let mut pending_rpc_calls: HashMap<i64, Sender<RpcFrame>> = HashMap::new();
         let mut subscriptions = Subscriptions::new();
@@ -685,7 +679,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
             init_handler(client_cmd_tx.clone(), client_events_receiver);
         }
 
-        async fn check_shv_api_version(client_cmd_tx: ClientCommandSender) -> Result<ShvApiVersion, CallRpcMethodError>
+        async fn check_shv_api_version<T: AppState>(client_cmd_tx: ClientCommandSender<T>) -> Result<ShvApiVersion, CallRpcMethodError>
         {
             let api_version = client_cmd_tx
                 .call_ls_list(".broker")
@@ -786,6 +780,17 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                     client_cmd_tx
                                         .send_message(unsubscribe_req)
                                         .unwrap_or_else(|e| error!("Cannot send Unsubscribe command through ClientCommand channel: {e}"));
+                                }
+                            }
+                            MountNode { path, node } => {
+                                if self.mounts.contains_key(&path) {
+                                    warn!("Another node already mounted on path `{path}`");
+                                }
+                                self.mounts.insert(path.clone(), node);
+                            }
+                            UnmountNode { path } => {
+                                if self.mounts.remove(&path).is_none() {
+                                    warn!("Not any node to unmount on path `{path}`");
                                 }
                             }
                             TerminateClient => {
@@ -903,7 +908,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
     async fn process_rpc_frame(
         &self,
         frame: RpcFrame,
-        client_cmd_tx: &ClientCommandSender,
+        client_cmd_tx: &ClientCommandSender<T>,
         pending_rpc_calls: &mut HashMap<i64, Sender<RpcFrame>>,
         subscriptions: &mut Subscriptions,
         subscription_requests: &mut HashMap<RqId, u64>,
@@ -1085,9 +1090,9 @@ mod tests {
 
         const SHV_API_VERSION_DEFAULT: ShvApiVersion = ShvApiVersion::V3;
 
-        pub(super) async fn receive_connected_and_disconnected_events(
+        pub(super) async fn receive_connected_and_disconnected_events<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            _cli_cmd_tx: ClientCommandSender,
+            _cli_cmd_tx: ClientCommandSender<T>,
             mut client_events_rx: ClientEventsReceiver,
         ) {
             {
@@ -1098,9 +1103,9 @@ mod tests {
             let _conn_mock = init_connection(&conn_evt_tx, &mut client_events_rx, SHV_API_VERSION_DEFAULT).await;
         }
 
-        pub(super) async fn send_message(
+        pub(super) async fn send_message<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1119,9 +1124,9 @@ mod tests {
             assert_eq!(msg.param(), Some(&42.into()));
         }
 
-        pub(super) async fn send_message_fails(
+        pub(super) async fn send_message_fails<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1144,13 +1149,13 @@ mod tests {
             rx.next().await.unwrap().to_rpcmesage().unwrap()
         }
 
-        async fn receive_notification(rx: &mut Subscriber) -> RpcMessage {
+        async fn receive_notification<T: AppState>(rx: &mut Subscriber<T>) -> RpcMessage {
             rx.next().await.unwrap().to_rpcmesage().unwrap()
         }
 
-        pub(super) async fn call_method_and_receive_response(
+        pub(super) async fn call_method_and_receive_response<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1166,9 +1171,9 @@ mod tests {
             assert_eq!(resp.result().unwrap(), &RpcValue::from(42));
         }
 
-        pub(super) async fn call_method_timeouts_when_disconnected(
+        pub(super) async fn call_method_timeouts_when_disconnected<T: AppState>(
             _conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut _cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut resp_rx = cli_cmd_tx
@@ -1177,8 +1182,8 @@ mod tests {
             receive_rpc_msg(&mut resp_rx).timeout(Duration::from_millis(1000)).await.expect_err("Unexpected method call response");
         }
 
-        async fn check_notification_received(
-            notify_rx: &mut Subscriber,
+        async fn check_notification_received<T: AppState>(
+            notify_rx: &mut Subscriber<T>,
             path: Option<&str>,
             method: Option<&str>,
             param: Option<&RpcValue>,
@@ -1193,9 +1198,9 @@ mod tests {
         }
 
         // Notifications in SHV API v2
-        pub(super) async fn receive_subscribed_notification_v2(
+        pub(super) async fn receive_subscribed_notification_v2<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V2).await;
@@ -1268,9 +1273,9 @@ mod tests {
             check_notification_received(&mut notify_rx_prefix, Some("path/to/resource"), Some(SIG_CHNG), Some(&"baz".into())).await;
         }
 
-        pub(super) async fn do_not_receive_unsubscribed_notification_v2(
+        pub(super) async fn do_not_receive_unsubscribed_notification_v2<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V2).await;
@@ -1308,9 +1313,9 @@ mod tests {
                 .expect_err("Unexpected notification received");
         }
 
-        pub(super) async fn subscribe_and_unsubscribe_v2(
+        pub(super) async fn subscribe_and_unsubscribe_v2<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V2).await;
@@ -1364,9 +1369,9 @@ mod tests {
         }
 
         // Notifications in SHV API v3
-        pub(super) async fn receive_subscribed_notification_v3(
+        pub(super) async fn receive_subscribed_notification_v3<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1422,9 +1427,9 @@ mod tests {
             check_notification_received(&mut notify_rx_prefix, Some("path/to/resource"), Some(SIG_CHNG), Some(&"baz".into())).await;
         }
 
-        pub(super) async fn do_not_receive_unsubscribed_notification_v3(
+        pub(super) async fn do_not_receive_unsubscribed_notification_v3<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1462,9 +1467,9 @@ mod tests {
                 .expect_err("Unexpected notification received");
         }
 
-        pub(super) async fn subscribe_and_unsubscribe_v3(
+        pub(super) async fn subscribe_and_unsubscribe_v3<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1518,9 +1523,9 @@ mod tests {
 
         // Tests that notifications are forwarded to subscribers only for confirmed
         // subscriptions — those that have received a response to their subscription request.
-        pub(super) async fn send_notifications_only_for_confirmed_subscriptions(
+        pub(super) async fn send_notifications_only_for_confirmed_subscriptions<T: AppState>(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender,
+            cli_cmd_tx: ClientCommandSender<T>,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1576,7 +1581,7 @@ mod tests {
         // Request handling tests
         //
         pub(super) fn make_client_with_handlers() -> Client<Full,()> {
-            async fn methods_getter(path: String, _: Option<AppState<()>>) -> Option<MetaMethods> {
+            async fn methods_getter(path: String, _: Option<()>) -> Option<MetaMethods> {
                 if path.is_empty() {
                     Some(MetaMethods::from(&PROPERTY_METHODS))
                 } else {
@@ -1584,7 +1589,7 @@ mod tests {
                 }
             }
 
-            async fn request_handler(rq: RpcMessage, client_cmd_tx: ClientCommandSender) {
+            async fn request_handler<T: AppState>(rq: RpcMessage, client_cmd_tx: ClientCommandSender<T>) {
                 let mut resp = rq.prepare_response().unwrap();
                 match rq.method() {
                     Some(crate::clientnode::METH_LS) => {
@@ -1623,8 +1628,8 @@ mod tests {
             conn_mock.expect_send_message().await
         }
 
-        pub(super) async fn handle_method_calls(conn_evt_tx: Sender<ConnectionEvent>,
-                                         _cli_cmd_tx: ClientCommandSender,
+        pub(super) async fn handle_method_calls<T: AppState>(conn_evt_tx: Sender<ConnectionEvent>,
+                                         _cli_cmd_tx: ClientCommandSender<T>,
                                          mut cli_evt_rx: ClientEventsReceiver)
         {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1730,10 +1735,10 @@ mod tests {
     }
 
     generics_def!(TestDriverBounds <C, F, S> where
-                  C: FnOnce(Sender<ConnectionEvent>, ClientCommandSender, ClientEventsReceiver) -> F,
+                  C: FnOnce(Sender<ConnectionEvent>, ClientCommandSender<S>, ClientEventsReceiver) -> F,
                   F: Future + Send + 'static,
                   F::Output: Send + 'static,
-                  S: Sync + Send + 'static,
+                  S: AppState,
                   );
 
 
@@ -1749,7 +1754,7 @@ mod tests {
 
                 #[generics(TestDriverBounds)]
                 async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                    let client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
+                    let mut client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
                     let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
                     let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
                     let init_handler = move |cli_cmd_tx, cli_evt_rx| {
@@ -1781,7 +1786,7 @@ mod tests {
 
                 #[generics(TestDriverBounds)]
                 async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                    let client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
+                    let mut client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
                     let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
                     let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
                     let init_handler = move |cli_cmd_tx, cli_evt_rx| {
