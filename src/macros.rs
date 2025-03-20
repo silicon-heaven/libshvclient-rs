@@ -47,7 +47,7 @@
 ///# ```
 #[macro_export]
 macro_rules! fixed_node {
-    ($fn_name:ident ( $request:ident, $client_cmd_tx:ident $(, $app_state:ident: $T:ty)?) {
+    ($fn_name:ident < $T:ty > ( $request:ident, $client_cmd_tx:ident $(, $app_state:ident)?) {
         $($method:tt [$($flags:ident)|+, $access:ident, $methodparam:expr, $methodresult:expr] $({ $(($signame:expr, $sigval:expr)),* })? $(($param:ident : $type:ty ))? => $body:block)+
     }) => {
 
@@ -64,7 +64,7 @@ macro_rules! fixed_node {
                 },)+
             ];
 
-            async fn $fn_name($request: ::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender $(, $app_state: Option<$crate::AppState<$T>>)?) {
+            async fn $fn_name($request: ::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: Option<$crate::AppState<$T>>)?) {
 
                 use shvrpc::RpcMessageMetaTags;
 
@@ -81,7 +81,7 @@ macro_rules! fixed_node {
                         };
                     )?
 
-                    async fn handler($request: ::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender $(, $app_state: $crate::AppState<$T>)?)
+                    async fn handler($request: ::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: $crate::AppState<$T>)?)
                     -> Option<std::result::Result<$crate::clientnode::RpcValue, $crate::clientnode::RpcError>> {
                         match $request.method() {
 

@@ -95,17 +95,15 @@ type State = RwLock<i32>;
 
 async fn delay_node_process_request(
     request: RpcMessage,
-    client_cmd_tx: ClientCommandSender,
-    mut state: Option<AppState<State>>,
+    client_cmd_tx: ClientCommandSender<State>,
+    state: Option<AppState<State>>,
 ) {
     if request.shv_path().unwrap_or_default().is_empty() {
         assert_eq!(request.method(), Some(METH_GET_DELAYED));
         let mut resp = request.prepare_response().unwrap_or_default();
         async_std::task::spawn(async move {
             let mut counter = state
-                .as_mut()
                 .expect("Missing state for delay node")
-                .clone()
                 .write_arc()
                 .await;
             let ret_val = {
@@ -124,7 +122,7 @@ async fn delay_node_process_request(
 
 
 async fn emit_chng_task(
-    client_cmd_tx: ClientCommandSender,
+    client_cmd_tx: ClientCommandSender<State>,
     mut client_evt_rx: ClientEventsReceiver,
     app_state: AppState<State>,
 ) -> shvrpc::Result<()> {
