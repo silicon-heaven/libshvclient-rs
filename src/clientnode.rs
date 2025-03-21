@@ -317,7 +317,7 @@ impl<'a, T: Send + Sync + 'static> ClientNode<'a, T> {
                         let result = dir(methods.iter().copied(), request.param().into());
                         send_response(request, client_cmd_tx, Ok(result));
                     } else if let Some(handler) = node.handlers.get(method) {
-                        spawn_task(handler.0(request, client_cmd_tx, app_state.clone()));
+                        spawn_task(handler.0(request, client_cmd_tx, app_state.clone())).detach();
                     } else if method == self::METH_LS {
                         let result = default_ls(request.param());
                         send_response(request, client_cmd_tx, Ok(result));
@@ -351,7 +351,7 @@ impl<'a, T: Send + Sync + 'static> ClientNode<'a, T> {
                                 panic!("BUG: Request method should be Some after access check."),
                         };
                     }
-                });
+                }).detach();
             },
             NodeVariant::Constant(node) => {
                 let methods = if request.shv_path().unwrap_or_default().is_empty() {

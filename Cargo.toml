@@ -34,6 +34,7 @@ async-broadcast = "0.7.1"
 async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 tokio = { version = "1.36.0", features = ["full"], optional = true }
 tokio-util = { version = "0.7.10", features = ["compat"], optional = true }
+smol = { version = "2.0.2", optional = true }
 
 # NOTE: macro_magic needs to be here as a direct dependency because some functions from
 # there are called in expansion of `generics_inner` macro from generics-alias crate.
@@ -52,3 +53,4 @@ macro_magic = "0.6.0"
 default = []
 tokio = ["dep:tokio", "dep:tokio-util"]
 async_std = ["dep:async-std"]
+smol = ["dep:smol"]

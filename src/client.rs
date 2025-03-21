@@ -872,7 +872,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                     api_version_tx
                                         .unbounded_send(api_version_res)
                                         .unwrap_or_else(|e| warn!("check_api_version send result failed: {e}"));
-                                });
+                                }).detach();
                             }
                             HeartbeatTimeout => {
                                 if let Some(api_version) = &shv_api_version {
@@ -1264,7 +1264,7 @@ mod tests {
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
                 }
-            );
+            ).detach();
 
             let mut notify_rx = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1329,8 +1329,7 @@ mod tests {
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
                 let _ = tx.send(conn_mock);
-            }
-            );
+            }).detach();
 
             let mut notify_rx = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1361,7 +1360,7 @@ mod tests {
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
                 let _ = tx.send(conn_mock);
-            });
+            }).detach();
 
             let mut notify_rx_1 = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1426,8 +1425,7 @@ mod tests {
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(43.into()));
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
-                }
-            );
+            }).detach();
 
             let mut notify_rx = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1483,8 +1481,7 @@ mod tests {
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
                 let _ = tx.send(conn_mock);
-            }
-            );
+            }).detach();
 
             let mut notify_rx = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1515,7 +1512,7 @@ mod tests {
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
                 let _ = tx.send(conn_mock);
-            });
+            }).detach();
 
             let mut notify_rx_1 = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1586,8 +1583,7 @@ mod tests {
                 // These signals should be received by both subscribers.
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(43.into()));
                 conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
-                }
-            );
+            }).detach();
 
             let mut subscriber_1 = cli_cmd_tx
                 .subscribe(ShvRI::from_path_method_signal("path/to/resource", "*", Some(SIG_CHNG)).unwrap())
@@ -1773,67 +1769,44 @@ mod tests {
 
 
     macro_rules! def_tests {
-        ($($name:ident $(#[$attr:meta])* $(($client:expr))?),+) => {
+        ($($name:ident $(#[$attr:meta])* $(($client:expr))?),+$(,)?) => {
 
-            #[cfg(feature = "tokio")]
-            mod tokio {
-                use super::*;
-                use crate::appnodes::DotAppNode;
+            use crate::appnodes::DotAppNode;
 
-                $(def_test!($name $(#[$attr])* $(,$client)?);)+
+            $(def_test!($name $(#[$attr])* $(,$client)?);)+
 
-                #[generics(TestDriverBounds)]
-                async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                    let mut client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
-                    let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
-                    let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
-                    let init_handler = move |cli_cmd_tx, cli_evt_rx| {
-                        let join_test_handle = ::tokio::task::spawn(test_drv(conn_evt_tx, cli_cmd_tx, cli_evt_rx));
-                        join_handle_tx.unbounded_send(join_test_handle).unwrap();
-                    };
-                    client.client_loop(conn_evt_rx, Some(init_handler)).await.expect("Client loop terminated with an error");
-                    let join_handle = join_handle_rx.next().await.expect("fetch test join handle");
-                    join_handle.await.expect("Test finished with error");
-                }
+            #[generics(TestDriverBounds)]
+            async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
+                let mut client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
+                let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
+                let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
+                let init_handler = move |cli_cmd_tx, cli_evt_rx| {
+                    let join_test_handle = crate::runtime::spawn_task(test_drv(conn_evt_tx, cli_cmd_tx, cli_evt_rx));
+                    join_handle_tx.unbounded_send(join_test_handle).unwrap();
+                };
+                client.client_loop(conn_evt_rx, Some(init_handler)).await.expect("Client loop terminated with an error");
+                let join_handle = join_handle_rx.next().await.expect("fetch test join handle");
+                let _res = join_handle.0.await;
 
-                #[generics(TestDriverBounds)]
-                pub fn run_test(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                    let _ = simple_logger::init_with_level(Level::Debug);
-
-                    ::tokio::runtime::Builder::new_multi_thread()
-                        .build()
-                        .unwrap()
-                        .block_on(init_client(test_drv, custom_client));
-                }
+                #[cfg(feature = "tokio")]
+                _res.expect("Test finished with error");
             }
 
-            #[cfg(feature = "async_std")]
-            mod async_std {
-                use crate::appnodes::DotAppNode;
-                use super::*;
+            #[generics(TestDriverBounds)]
+            pub fn run_test(test_drv: C, custom_client: Option<Client<Full,S>>) {
+                let _ = simple_logger::init_with_level(Level::Debug);
 
-                $(def_test!($name $(#[$attr])* $(,$client)?);)+
+                #[cfg(feature = "tokio")]
+                ::tokio::runtime::Builder::new_multi_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(init_client(test_drv, custom_client));
 
-                #[generics(TestDriverBounds)]
-                async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                    let mut client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
-                    let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
-                    let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
-                    let init_handler = move |cli_cmd_tx, cli_evt_rx| {
-                        let join_test_handle = ::async_std::task::spawn(test_drv(conn_evt_tx, cli_cmd_tx, cli_evt_rx));
-                        join_handle_tx.unbounded_send(join_test_handle).unwrap();
-                    };
-                    client.client_loop(conn_evt_rx, Some(init_handler)).await.expect("Client loop terminated with an error");
-                    let join_handle = join_handle_rx.next().await.expect("fetch test join handle");
-                    join_handle.await; //.expect("Test finished with error");
-                }
+                #[cfg(feature = "async_std")]
+                ::async_std::task::block_on(init_client(test_drv, custom_client));
 
-                #[generics(TestDriverBounds)]
-                pub fn run_test(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                    let _ = simple_logger::init_with_level(Level::Debug);
-
-                    ::async_std::task::block_on(init_client(test_drv, custom_client));
-                }
+                #[cfg(feature = "smol")]
+                ::smol::block_on(init_client(test_drv, custom_client));
             }
         };
     }
@@ -1853,7 +1826,7 @@ mod tests {
         do_not_receive_unsubscribed_notification_v3,
         subscribe_and_unsubscribe_v3,
         send_notifications_only_for_confirmed_subscriptions,
-        handle_method_calls (make_client_with_handlers())
+        handle_method_calls (make_client_with_handlers()),
     }
 
 }

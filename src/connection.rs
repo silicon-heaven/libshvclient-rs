@@ -1,4 +1,3 @@
-use crate::runtime::{current_task_runtime, Runtime};
 pub use crate::client::Sender;
 use duration_str::HumanFormat;
 use futures::{select, FutureExt, StreamExt};
@@ -9,42 +8,47 @@ use shvrpc::framerw::{FrameReader, FrameWriter};
 use shvrpc::rpcframe::RpcFrame;
 use shvrpc::util::login_from_url;
 use shvrpc::{client, RpcMessage};
-#[cfg(feature = "async_std")]
+#[cfg(any(feature = "async_std" ,feature = "smol"))]
 use futures::AsyncReadExt;
 
 pub fn spawn_connection_task(config: &ClientConfig, conn_evt_tx: Sender<ConnectionEvent>) {
-    match current_task_runtime() {
-        #[cfg(feature = "tokio")]
-        Runtime::Tokio => {
-            tokio::spawn(connection_task(config.clone(), conn_evt_tx, Runtime::Tokio));
-        }
-        #[cfg(feature = "async_std")]
-        Runtime::AsyncStd => {
-            async_std::task::spawn(connection_task(config.clone(), conn_evt_tx, Runtime::AsyncStd));
-        }
-    };
+    let task = connection_task(config.clone(), conn_evt_tx);
+    #[cfg(feature = "tokio")]
+    tokio::spawn(task);
+    #[cfg(feature = "async_std")]
+    async_std::task::spawn(task);
+    #[cfg(feature = "smol")]
+    smol::spawn(task).detach();
 }
 
-async fn connect(address: &str, runtime: Runtime)
-    -> shvrpc::Result<(Box<dyn futures::AsyncRead + Send + Unpin>, Box<dyn futures::AsyncWrite + Send + Unpin>)>
+async fn connect(address: &str)
+    -> shvrpc::Result<(
+        Box<dyn futures::AsyncRead + Send + Unpin>,
+        Box<dyn futures::AsyncWrite + Send + Unpin>
+    )>
 {
-    match runtime {
-        #[cfg(feature = "tokio")]
-        Runtime::Tokio => {
-            use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-            let stream = tokio::net::TcpStream::connect(address).await?;
-            let (reader, writer) = stream.into_split();
-            let writer = writer.compat_write();
-            let reader = tokio::io::BufReader::new(reader).compat();
-            Ok((Box::new(reader), Box::new(writer)))
-        }
-        #[cfg(feature = "async_std")]
-        Runtime::AsyncStd => {
-            let stream = async_std::net::TcpStream::connect(address).await?;
-            let (reader, writer) = stream.split();
-            let reader = futures::io::BufReader::new(reader);
-            Ok((Box::new(reader), Box::new(writer)))
-        }
+    #[cfg(feature = "tokio")]
+    {
+        use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+        let stream = tokio::net::TcpStream::connect(address).await?;
+        let (reader, writer) = stream.into_split();
+        let writer = writer.compat_write();
+        let reader = tokio::io::BufReader::new(reader).compat();
+        Ok((Box::new(reader), Box::new(writer)))
+    }
+    #[cfg(feature = "async_std")]
+    {
+        let stream = async_std::net::TcpStream::connect(address).await?;
+        let (reader, writer) = stream.split();
+        let reader = futures::io::BufReader::new(reader);
+        Ok((Box::new(reader), Box::new(writer)))
+    }
+    #[cfg(feature = "smol")]
+    {
+        let stream = smol::net::TcpStream::connect(address).await?;
+        let (reader, writer) = stream.split();
+        let reader = futures::io::BufReader::new(reader);
+        Ok((Box::new(reader), Box::new(writer)))
     }
 }
 
@@ -71,7 +75,7 @@ enum ConnectionLoopResult {
     ClientTerminated,
 }
 
-async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>, runtime: Runtime) {
+async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>) {
     async {
         if let Some(reconnect_interval) = &config.reconnect_interval {
             info!("Reconnect interval set to: {:?}", reconnect_interval);
@@ -83,7 +87,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
                     warn!("conn_event_sender is closed");
                     break;
                 }
-                match connection_loop(&config, &conn_event_sender, runtime).await {
+                match connection_loop(&config, &conn_event_sender).await {
                     ConnectionLoopResult::ClientTerminated => break,
                     ConnectionLoopResult::ConnectionClosed => {
                         info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
@@ -92,7 +96,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
                 }
             }
         } else {
-            connection_loop(&config, &conn_event_sender, runtime).await;
+            connection_loop(&config, &conn_event_sender).await;
         }
     }
     .await;
@@ -103,7 +107,6 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
 async fn connection_loop(
     config: &ClientConfig,
     conn_event_sender: &Sender<ConnectionEvent>,
-    runtime: Runtime,
 ) -> ConnectionLoopResult {
     let (host, port) = (
         config.url.host_str().unwrap_or_default(),
@@ -113,7 +116,7 @@ async fn connection_loop(
 
     // Establish a connection
     info!("Connecting to: {address}");
-    let (mut frame_reader, mut frame_writer) = match connect(&address, runtime).await {
+    let (mut frame_reader, mut frame_writer) = match connect(&address).await {
         Ok((rd, wr)) => (shvrpc::streamrw::StreamFrameReader::new(rd), shvrpc::streamrw::StreamFrameWriter::new(wr)),
         Err(err) => {
             warn!("Cannot connect to {address}: {err}");
@@ -156,7 +159,7 @@ async fn connection_loop(
     info!("Login OK, client ID: {client_id}");
 
     let (writer_tx, mut writer_rx) = futures::channel::mpsc::unbounded();
-    let _writer_task = crate::runtime::spawn_task(async move {
+    crate::runtime::spawn_task(async move {
         debug!("Writer task start");
         let res: shvrpc::Result<()> = {
             while let Some(frame) = writer_rx.next().await {
@@ -168,7 +171,7 @@ async fn connection_loop(
         };
         debug!("Writer task finish");
         res
-    });
+    }).detach();
 
     let (conn_cmd_sender, conn_cmd_receiver) = futures::channel::mpsc::unbounded();
 
