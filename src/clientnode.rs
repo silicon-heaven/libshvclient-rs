@@ -45,7 +45,7 @@ fn dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: DirParam) -
     }
 }
 
-
+#[derive(Debug)]
 pub(crate) enum RequestResult {
     Response(RpcValue),
     Error(RpcError),
@@ -74,7 +74,10 @@ pub(crate) fn process_local_dir_ls<V>(
             format!("Invalid shv path: {}", shv_path),
         )));
     }
-    if method == METH_DIR && !is_mount_point {
+    let is_real_node = mount.is_some_and(|(_, rest)|
+        rest.is_empty() || children_on_path.is_none()
+    );
+    if method == METH_DIR && !is_real_node {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let dir = dir(DIR_LS_METHODS, rpcmsg.param().into());
@@ -101,21 +104,20 @@ pub(crate) fn process_local_dir_ls<V>(
     None
 }
 fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> RequestResult {
-    match param {
-        LsParam::List => match children {
-            None => RequestResult::Error(RpcError::new(
+    match children {
+        None => RequestResult::Error(RpcError::new(
                 RpcErrorCode::MethodCallException,
                 "Invalid shv path",
-            )),
-            Some(dirs) => {
-                let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
-                RequestResult::Response(res.into())
+        )),
+        Some(dirs) =>
+            match param {
+                LsParam::List => {
+                    let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
+                    RequestResult::Response(res.into())
+                },
+                LsParam::Exists(path) =>
+                    RequestResult::Response(dirs.contains(&path).into()),
             }
-        },
-        LsParam::Exists(path) => match children {
-            None => RequestResult::Response(false.into()),
-            Some(children) => RequestResult::Response(children.contains(&path).into()),
-        },
     }
 }
 pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: impl AsRef<str>) -> Option<Vec<String>> {
@@ -130,7 +132,7 @@ pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: impl AsRef<str>) 
                 let dir_rest_start = if path.is_empty() { 0 } else { path.len() + 1 };
                 let mut updirs = key[dir_rest_start..].split('/');
                 if let Some(dir) = updirs.next() {
-                    if !unique_dirs.contains(dir) {
+                    if !dir.is_empty() && !unique_dirs.contains(dir) {
                         dirs.push(dir.to_string());
                         unique_dirs.insert(dir.to_string());
                     }
@@ -522,6 +524,7 @@ mod tests {
     #[test]
     fn ls_mounts() {
         let mut mounts = BTreeMap::new();
+        mounts.insert("".into(), ());
         mounts.insert("a".into(), ());
         mounts.insert("a/1".into(), ());
         mounts.insert("a/123".into(), ());
@@ -617,5 +620,128 @@ mod tests {
         assert_eq!(methods[2].name, "echo");
         assert_eq!(handlers.len(), 1, "Expected 1 handler");
 
+    }
+
+    #[test]
+    fn longest_path_prefix() {
+        let map = BTreeMap::from([
+            ("".to_string(), ()),
+            ("foo".to_string(), ()),
+            ("foo/bar".to_string(), ()),
+            ("x".to_string(), ())
+        ]);
+        assert_eq!(find_longest_path_prefix(&map, ""), Some(("", "")));
+        assert_eq!(find_longest_path_prefix(&map, "blah"), Some(("", "blah")));
+        assert_eq!(find_longest_path_prefix(&map, "foo/blah"), Some(("foo", "blah")));
+        assert_eq!(find_longest_path_prefix(&map, "/"), Some(("", "")));
+    }
+
+    fn make_request_frame(path: &str, method: &str, param: Option<RpcValue>) -> RpcFrame {
+        RpcMessage::new_request(path, method, param)
+            .to_frame()
+            .unwrap()
+    }
+
+    #[test]
+    fn local_dir_ls_with_root() {
+        let mounts = BTreeMap::from([
+            ("".to_string(), ()),
+            ("foo/x".to_string(), ()),
+            ("foo/bar".to_string(), ()),
+            ("x".to_string(), ())
+        ]);
+
+        // dir
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("", METH_DIR, None)).is_none());
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("blah", METH_DIR, None))
+            .is_none()
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("foo", METH_DIR, None))
+            .is_some_and(|res| {
+                let RequestResult::Response(resp) = res else {
+                    panic!("Not a response");
+                };
+                dir(DIR_LS_METHODS, DirParam::Brief) == resp
+            })
+        );
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_DIR, None)).is_none());
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_DIR, None)).is_none());
+
+        // ls
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("", METH_LS, None))
+            .is_some_and(|res| {
+                matches!((ls_children_to_result(Some(vec!["foo".into(), "x".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
+            })
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("blah", METH_LS, None))
+            .is_none()
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("foo", METH_LS, None))
+            .is_some_and(|res| {
+                matches!((ls_children_to_result(Some(vec!["bar".into(), "x".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
+            })
+        );
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_LS, None)).is_none());
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_LS, None)).is_none());
+    }
+
+    #[test]
+    fn local_dir_ls_without_root() {
+        let mounts = BTreeMap::from([
+            ("foo/x".to_string(), ()),
+            ("foo/bar".to_string(), ()),
+            ("x".to_string(), ())
+        ]);
+
+        // dir
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("", METH_DIR, None))
+            .is_some_and(|res| {
+                let RequestResult::Response(resp) = res else {
+                    panic!("Not a response");
+                };
+                dir(DIR_LS_METHODS, DirParam::Brief) == resp
+            })
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("blah", METH_DIR, None))
+            .is_some_and(|resp| matches!(resp, RequestResult::Error(_)))
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("foo", METH_DIR, None))
+            .is_some_and(|res| {
+                let RequestResult::Response(resp) = res else {
+                    panic!("Not a response");
+                };
+                dir(DIR_LS_METHODS, DirParam::Brief) == resp
+            })
+        );
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_DIR, None)).is_none());
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_DIR, None)).is_none());
+
+        // ls
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("", METH_LS, None))
+            .is_some_and(|res| {
+                matches!((ls_children_to_result(Some(vec!["foo".into(), "x".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
+            })
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("blah", METH_LS, None))
+            .is_some_and(|resp| matches!(resp, RequestResult::Error(_)))
+        );
+        assert!(
+            process_local_dir_ls(&mounts, &make_request_frame("foo", METH_LS, None))
+            .is_some_and(|res| {
+                matches!((ls_children_to_result(Some(vec!["bar".into(), "x".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
+            })
+        );
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_LS, None)).is_none());
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_LS, None)).is_none());
     }
 }
