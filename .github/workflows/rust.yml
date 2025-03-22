@@ -16,15 +16,18 @@ permissions:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        feature: ["tokio", "smol", "async_std"]
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Clippy
-      run: cargo clippy --verbose --all-targets --all-features
-    - name: Build
-      run: cargo build --verbose --all-targets --all-features
-    - name: Run tests
-      run: cargo test --verbose --all-targets --all-features
+      - uses: actions/checkout@v4
+      - name: Clippy (${{ matrix.feature }})
+        run: cargo clippy --verbose --all-targets --features ${{ matrix.feature }}
+      - name: Build (${{ matrix.feature }})
+        run: cargo build --verbose --all-targets --features ${{ matrix.feature }}
+      - name: Run tests (${{ matrix.feature }})
+        run: cargo test --verbose --all-targets --features ${{ matrix.feature }}
 
   coverage:
     name: Code coverage
