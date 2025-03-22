@@ -17,6 +17,11 @@ name = "simple_device_async_std"
 path = "src/examples/simple_device_async_std.rs"
 required-features = ["async_std"]
 
+[[example]]
+name = "simple_device_smol"
+path = "src/examples/simple_device_smol.rs"
+required-features = ["smol"]
+
 [dev-dependencies]
 clap = { version = "4.4", features = ["derive"] }
 simple_logger = { version = "5.0.0", features = ["stderr"] }
