@@ -693,9 +693,10 @@ mod tests {
     #[test]
     fn local_dir_ls_without_root() {
         let mounts = BTreeMap::from([
-            ("foo/x".to_string(), ()),
+            ("foo".to_string(), ()),
+            ("foo/x/y".to_string(), ()),
             ("foo/bar".to_string(), ()),
-            ("x".to_string(), ())
+            ("z".to_string(), ())
         ]);
 
         // dir
@@ -713,7 +714,8 @@ mod tests {
             .is_some_and(|resp| matches!(resp, RequestResult::Error(_)))
         );
         assert!(
-            process_local_dir_ls(&mounts, &make_request_frame("foo", METH_DIR, None))
+            process_local_dir_ls(&mounts, &make_request_frame("foo", METH_DIR, None)).is_none());
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_DIR, None))
             .is_some_and(|res| {
                 let RequestResult::Response(resp) = res else {
                     panic!("Not a response");
@@ -721,14 +723,13 @@ mod tests {
                 dir(DIR_LS_METHODS, DirParam::Brief) == resp
             })
         );
-        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_DIR, None)).is_none());
         assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_DIR, None)).is_none());
 
         // ls
         assert!(
             process_local_dir_ls(&mounts, &make_request_frame("", METH_LS, None))
             .is_some_and(|res| {
-                matches!((ls_children_to_result(Some(vec!["foo".into(), "x".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
+                matches!((ls_children_to_result(Some(vec!["foo".into(), "z".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
             })
         );
         assert!(
@@ -741,7 +742,11 @@ mod tests {
                 matches!((ls_children_to_result(Some(vec!["bar".into(), "x".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
             })
         );
-        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_LS, None)).is_none());
+        assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_LS, None))
+            .is_some_and(|res| {
+                matches!((ls_children_to_result(Some(vec!["y".into()]), LsParam::List), res), (RequestResult::Response(a), RequestResult::Response(b)) if a == b)
+            })
+        );
         assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_LS, None)).is_none());
     }
 }
