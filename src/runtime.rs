@@ -1,5 +1,5 @@
 
-#[must_use = "Task has to be used, the behavior of `drop` is implementation defined."]
+#[must_use = "Task has to be used. If you want to detach the task, call .detach() on it."]
 pub struct TaskHandle<F: futures::Future + Send + 'static>(
     #[cfg(feature = "tokio")]
     pub tokio::task::JoinHandle<F::Output>,
