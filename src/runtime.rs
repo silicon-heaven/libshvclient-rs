@@ -1,42 +1,27 @@
-#[cfg(not(any(feature = "tokio", feature = "async_std")))]
-compile_error!("No async runtime selected. At least one of `tokio`, `async_std` features must be enabled.");
 
-#[derive(Clone, Copy)]
-pub enum Runtime {
-    #[cfg(feature = "async_std")]
-    AsyncStd,
+#[must_use = "Task has to be used. If you want to detach the task, call .detach() on it."]
+pub struct TaskHandle<F: futures::Future + Send + 'static>(
     #[cfg(feature = "tokio")]
-    Tokio,
-}
-
-pub fn current_task_runtime() -> Runtime {
+    pub tokio::task::JoinHandle<F::Output>,
     #[cfg(feature = "async_std")]
-    if ::async_std::task::try_current().is_some() {
-        return Runtime::AsyncStd;
-    }
-    #[cfg(feature = "tokio")]
-    if ::tokio::runtime::Handle::try_current().is_ok() {
-        return Runtime::Tokio;
-    }
-    panic!("Could not find suitable async runtime");
-}
-
-pub enum TaskHandle<F: futures::Future + Send + 'static> {
-    #[cfg(feature = "tokio")]
-    Tokio(tokio::task::JoinHandle<F::Output>),
-    #[cfg(feature = "async_std")]
-    AsyncStd(async_std::task::JoinHandle<F::Output>),
-
-}
+    pub async_std::task::JoinHandle<F::Output>,
+    #[cfg(feature = "smol")]
+    pub smol::Task<F::Output>,
+);
 
 impl<F: futures::Future + Send + 'static> TaskHandle<F> {
     pub async fn cancel(self) {
-        match self {
-            #[cfg(feature = "tokio")]
-            Self::Tokio(handle) => { handle.abort(); }
-            #[cfg(feature = "async_std")]
-            Self::AsyncStd(handle) => { handle.cancel().await; }
-        }
+        #[cfg(feature = "tokio")]
+        self.0.abort();
+        #[cfg(feature = "async_std")]
+        self.0.cancel().await;
+        #[cfg(feature = "smol")]
+        self.0.cancel().await;
+    }
+
+    pub fn detach(self) {
+        #[cfg(feature = "smol")]
+        self.0.detach();
     }
 }
 
@@ -45,11 +30,10 @@ where
     F: futures::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-
-    match current_task_runtime() {
-        #[cfg(feature = "tokio")]
-        Runtime::Tokio => { TaskHandle::Tokio(tokio::spawn(f)) },
-        #[cfg(feature = "async_std")]
-        Runtime::AsyncStd => { TaskHandle::AsyncStd(async_std::task::spawn(f)) },
-    }
+    #[cfg(feature = "tokio")]
+    { TaskHandle(tokio::spawn(f)) }
+    #[cfg(feature = "async_std")]
+    { TaskHandle(async_std::task::spawn(f)) }
+    #[cfg(feature = "smol")]
+    { TaskHandle(smol::spawn(f)) }
 }
