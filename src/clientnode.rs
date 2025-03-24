@@ -74,10 +74,13 @@ pub(crate) fn process_local_dir_ls<V>(
             format!("Invalid shv path: {}", shv_path),
         )));
     }
-    let is_real_node = mount.is_some_and(|(_, rest)|
-        rest.is_empty() || children_on_path.is_none()
-    );
-    if method == METH_DIR && !is_real_node {
+
+    // Note: `tree` here means our mountpoint tree. The path can still become a part of the tree
+    // via a dyanmic node.
+    let is_in_tree = children_on_path.is_some();
+    let is_direct_mountpoint = mount.is_some_and(|(_, rest)| rest.is_empty());
+
+    if method == METH_DIR && is_in_tree && !is_direct_mountpoint {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let dir = dir(DIR_LS_METHODS, rpcmsg.param().into());
