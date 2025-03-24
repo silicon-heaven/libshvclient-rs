@@ -37,3 +37,4 @@ jobs:
         uses: syyyr/rust-pycobertura-action@v2.0.0
         with:
           project_name: libshvclient
+          cargo_test_arguments: --features smol
