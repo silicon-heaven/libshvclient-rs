@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 
 [lib]
@@ -29,7 +29,7 @@ futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
 log = "0.4.20"
-duration-str = "0.12.0"
+duration-str = "0.16"
 async-broadcast = "0.7.1"
 async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 tokio = { version = "1.36.0", features = ["full"], optional = true }
@@ -37,7 +37,7 @@ tokio-util = { version = "0.7.10", features = ["compat"], optional = true }
 
 # NOTE: macro_magic needs to be here as a direct dependency because some functions from
 # there are called in expansion of `generics_inner` macro from generics-alias crate.
-macro_magic = "0.5.0"
+macro_magic = "0.6.0"
 
 
 # For local development

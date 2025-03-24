@@ -237,7 +237,16 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     );
 
+    let root_node = shvclient::fixed_node!(
+        root_handler<State>(request, _client_cmd_tx) {
+            "info" [None, Read, "", ""] => {
+                Some(Ok("Simple device tokio".into()))
+            }
+        }
+    );
+
     shvclient::Client::new(DotAppNode::new("simple_device_tokio"))
+        .mount("", root_node)
         .mount("stateless", stateless_node)
         .mount("status/delayed", delay_node)
         .mount("status/dyn", ClientNode::dynamic(
