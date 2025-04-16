@@ -70,7 +70,7 @@ impl DotAppNode {
 
 impl ConstantNode for DotAppNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DOT_APP_METHODS.iter().copied().collect()
+        DOT_APP_METHODS.to_vec()
     }
 
     fn process_request(&self, request: &RpcMessage) -> Option<Result<RpcValue, RpcError>> {
@@ -132,7 +132,7 @@ impl DotDeviceNode {
 
 impl ConstantNode for DotDeviceNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DOT_DEVICE_METHODS.iter().copied().collect()
+        DOT_DEVICE_METHODS.to_vec()
     }
 
     fn process_request(&self, request: &RpcMessage) -> Option<Result<RpcValue, RpcError>> {

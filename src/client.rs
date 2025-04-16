@@ -614,6 +614,12 @@ impl Client<Plain, ()> {
     }
 }
 
+impl<T: Send + Sync + 'static> Default for Client<Full, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Send + Sync + 'static> Client<Full, T> {
     pub fn new() -> Self {
         Self {
