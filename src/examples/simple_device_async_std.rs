@@ -186,7 +186,8 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         async_std::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
     };
 
-    shvclient::Client::new(DotAppNode::new("simple_device_async_std"))
+    shvclient::Client::new()
+        .app(DotAppNode::new("simple_device_async_std"))
         .device(DotDeviceNode::new("simple_device", "0.1", Some("00000".into())))
         .mount("status/delayed", ClientNode::fixed(
                 DELAY_METHODS,

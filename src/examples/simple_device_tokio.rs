@@ -245,7 +245,8 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     );
 
-    shvclient::Client::new(DotAppNode::new("simple_device_tokio"))
+    shvclient::Client::new()
+        .app(DotAppNode::new("simple_device_tokio"))
         .mount("", root_node)
         .mount("stateless", stateless_node)
         .mount("status/delayed", delay_node)

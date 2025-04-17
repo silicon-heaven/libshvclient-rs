@@ -614,14 +614,23 @@ impl Client<Plain, ()> {
     }
 }
 
+impl<T: Send + Sync + 'static> Default for Client<Full, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Send + Sync + 'static> Client<Full, T> {
-    pub fn new(app_node: crate::appnodes::DotAppNode) -> Self {
-        let client = Self {
+    pub fn new() -> Self {
+        Self {
             mounts: Default::default(),
             app_state: Default::default(),
             variant_marker: PhantomData,
-        };
-        client.mount(".app", ClientNode::constant(app_node))
+        }
+    }
+
+    pub fn app(self, app_node: crate::appnodes::DotAppNode) -> Self {
+        self.mount(".app", ClientNode::constant(app_node))
     }
 
     pub fn device(self, device_node: crate::appnodes::DotDeviceNode) -> Self {
@@ -1636,7 +1645,8 @@ mod tests {
                 client_cmd_tx.send_message(resp).unwrap();
             }
 
-            Client::new(DotAppNode::new("test"))
+            Client::new()
+                .app(DotAppNode::new("test"))
                 .mount_dynamic("dynamic/sync",
                     MethodsGetter::new(methods_getter),
                     RequestHandler::stateless(request_handler))
@@ -1777,7 +1787,7 @@ mod tests {
 
             #[generics(TestDriverBounds)]
             async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
-                let mut client = custom_client.unwrap_or_else(|| Client::new(DotAppNode::new("test")));
+                let mut client = custom_client.unwrap_or_else(|| Client::new().app(DotAppNode::new("test")));
                 let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
                 let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
                 let init_handler = move |cli_cmd_tx, cli_evt_rx| {

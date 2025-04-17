@@ -1,7 +1,7 @@
 [package]
 name = "shvclient"
-version = "0.6.0"
-edition = "2021"
+version = "0.7.0"
+edition = "2024"
 
 [lib]
 name = "shvclient"
@@ -34,7 +34,7 @@ futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
 log = "0.4.20"
-duration-str = "0.16"
+duration-str = "0.17"
 async-broadcast = "0.7.1"
 async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 tokio = { version = "1.36.0", features = ["full"], optional = true }

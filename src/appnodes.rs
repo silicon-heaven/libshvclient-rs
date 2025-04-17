@@ -13,8 +13,8 @@ const METH_SERIAL_NUMBER: &str = "serialNumber";
 const SHV_VERSION_MAJOR: i32 = 3;
 const SHV_VERSION_MINOR: i32 = 0;
 
-const DOT_APP_METHODS: [MetaMethod; 4] = [
-    MetaMethod {
+pub const DOT_APP_METHODS: &[&MetaMethod] = &[
+    &MetaMethod {
         name: METH_SHV_VERSION_MAJOR,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Browse,
@@ -23,7 +23,7 @@ const DOT_APP_METHODS: [MetaMethod; 4] = [
         signals: &[],
         description: "",
     },
-    MetaMethod {
+    &MetaMethod {
         name: METH_SHV_VERSION_MINOR,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Browse,
@@ -32,7 +32,7 @@ const DOT_APP_METHODS: [MetaMethod; 4] = [
         signals: &[],
         description: "",
     },
-    MetaMethod {
+    &MetaMethod {
         name: METH_NAME,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Browse,
@@ -41,7 +41,7 @@ const DOT_APP_METHODS: [MetaMethod; 4] = [
         signals: &[],
         description: "",
     },
-    MetaMethod {
+    &MetaMethod {
         name: METH_PING,
         flags: Flag::None as u32,
         access: AccessLevel::Browse,
@@ -70,7 +70,7 @@ impl DotAppNode {
 
 impl ConstantNode for DotAppNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DOT_APP_METHODS.iter().collect()
+        DOT_APP_METHODS.to_vec()
     }
 
     fn process_request(&self, request: &RpcMessage) -> Option<Result<RpcValue, RpcError>> {
@@ -84,8 +84,8 @@ impl ConstantNode for DotAppNode {
     }
 }
 
-const DOT_DEVICE_METHODS: [MetaMethod; 3] = [
-    MetaMethod {
+pub const DOT_DEVICE_METHODS: &[&MetaMethod] = &[
+    &MetaMethod {
         name: METH_NAME,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Browse,
@@ -94,7 +94,7 @@ const DOT_DEVICE_METHODS: [MetaMethod; 3] = [
         signals: &[],
         description: "",
     },
-    MetaMethod {
+    &MetaMethod {
         name: METH_VERSION,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Browse,
@@ -103,7 +103,7 @@ const DOT_DEVICE_METHODS: [MetaMethod; 3] = [
         signals: &[],
         description: "",
     },
-    MetaMethod {
+    &MetaMethod {
         name: METH_SERIAL_NUMBER,
         flags: Flag::IsGetter as u32,
         access: AccessLevel::Browse,
@@ -132,7 +132,7 @@ impl DotDeviceNode {
 
 impl ConstantNode for DotDeviceNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DOT_DEVICE_METHODS.iter().collect()
+        DOT_DEVICE_METHODS.to_vec()
     }
 
     fn process_request(&self, request: &RpcMessage) -> Option<Result<RpcValue, RpcError>> {

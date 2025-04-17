@@ -184,8 +184,16 @@ fn main() -> shvrpc::Result<()> {
         smol::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter)).detach();
     };
 
+    const SMOL_THREADS: &str = "SMOL_THREADS";
+    if std::env::var(SMOL_THREADS).is_err() {
+        if let Ok(num_threads) = std::thread::available_parallelism() {
+            // set_var called before any other threads and smol runtime
+            unsafe { std::env::set_var(SMOL_THREADS, num_threads.to_string()); }
+        }
+    }
     smol::block_on(async move {
-        shvclient::Client::new(DotAppNode::new("simple_device_async_std"))
+        shvclient::Client::new()
+            .app(DotAppNode::new("simple_device_smol"))
             .device(DotDeviceNode::new("simple_device", "0.1", Some("00000".into())))
             .mount("status/delayed", ClientNode::fixed(
                     DELAY_METHODS,
