@@ -143,6 +143,7 @@ async fn connection_loop(
         mount_point: config.mount.clone().unwrap_or_default().to_owned(),
         device_id: config.device_id.clone().unwrap_or_default().to_owned(),
         heartbeat_interval,
+        reset_session: false,
         ..Default::default()
     };
 
