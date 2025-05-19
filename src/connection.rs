@@ -143,11 +143,10 @@ async fn connection_loop(
         mount_point: config.mount.clone().unwrap_or_default().to_owned(),
         device_id: config.device_id.clone().unwrap_or_default().to_owned(),
         heartbeat_interval,
-        reset_session: false,
         ..Default::default()
     };
 
-    let client_id = match client::login(&mut frame_reader, &mut frame_writer, &login_params).await {
+    let client_id = match client::login(&mut frame_reader, &mut frame_writer, &login_params, false).await {
         Ok(id) => id,
         Err(err) => {
             warn!("Login failed: {err}");
