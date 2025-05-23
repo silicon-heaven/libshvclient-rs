@@ -1,9 +1,13 @@
 use crate::connection::{spawn_connection_task, ConnectionCommand, ConnectionEvent, ConnectionFailedKind};
 use crate::clientnode::{find_longest_path_prefix, process_local_dir_ls, ClientNode, RequestResult, Route, METH_DIR, METH_LS, METH_PING};
 use async_broadcast::RecvError;
+use futures::channel::oneshot;
 use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
 use futures::{select, Future, FutureExt, StreamExt};
 use futures::channel::mpsc::TrySendError;
+use futures_time::task::sleep;
+use futures_time::time::Duration;
 use log::*;
 use shvrpc::client::ClientConfig;
 use shvrpc::metamethod::MetaMethod;
@@ -166,52 +170,45 @@ impl<T> ClientCommandSender<T> {
             .unwrap_or_else(|e| error!("Failed to send UnmountNode command: {e}"));
     }
 
-    pub fn do_rpc_call_param<'a>(
+    pub fn do_rpc_call<'a>(
         &self,
         shvpath: impl Into<&'a str>,
         method: impl Into<&'a str>,
         param: Option<RpcValue>,
+        timeout: Option<Duration>,
     ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand<T>>>
     {
         let (response_sender, response_receiver) = futures::channel::mpsc::unbounded();
         self.sender.unbounded_send(ClientCommand::RpcCall {
             request: RpcMessage::new_request(shvpath.into(), method.into(), param),
-            response_sender
+            response_sender,
+            timeout,
         })
         .map(|_| response_receiver)
     }
 
-    pub fn do_rpc_call<'a>(
-        &self,
-        shvpath: impl Into<&'a str>,
-        method: impl Into<&'a str>,
-    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand<T>>>
-    {
-        self.do_rpc_call_param(shvpath, method, None)
+    pub async fn call_dir(&self, path: &str, param: DirParam, timeout: Option<Duration>) -> Result<DirResult, CallRpcMethodError> {
+        self.call_dir_into(path, param, timeout).await
     }
 
-    pub async fn call_dir(&self, path: &str, param: DirParam) -> Result<DirResult, CallRpcMethodError> {
-        self.call_dir_into(path, param).await
+    pub async fn call_dir_brief(&self, path: &str, timeout: Option<Duration>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+        self.call_dir_into(path, DirParam::Brief, timeout).await
     }
 
-    pub async fn call_dir_brief(&self, path: &str) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
-        self.call_dir_into(path, DirParam::Brief).await
+    pub async fn call_dir_full(&self, path: &str, timeout: Option<Duration>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+        self.call_dir_into(path, DirParam::Full, timeout).await
     }
 
-    pub async fn call_dir_full(&self, path: &str) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
-        self.call_dir_into(path, DirParam::Full).await
+    pub async fn call_dir_exists(&self, path: &str, method: &str, timeout: Option<Duration>) -> Result<bool, CallRpcMethodError> {
+        self.call_dir_into(path, DirParam::Exists(method.into()), timeout).await
     }
 
-    pub async fn call_dir_exists(&self, path: &str, method: &str) -> Result<bool, CallRpcMethodError> {
-        self.call_dir_into(path, DirParam::Exists(method.into())).await
-    }
-
-    async fn call_dir_into<R, E>(&self, path: &str, param: DirParam) -> Result<R, CallRpcMethodError>
+    async fn call_dir_into<R, E>(&self, path: &str, param: DirParam, timeout: Option<Duration>) -> Result<R, CallRpcMethodError>
     where
         R: TryFrom<DirResult, Error = E>,
         E: std::fmt::Display,
     {
-        self.call_rpc_method(path, METH_DIR, Some(RpcValue::from(param)))
+        self.call_rpc_method(path, METH_DIR, Some(RpcValue::from(param)), timeout)
             .await
             .and_then(|dir_res|
                 R::try_from(dir_res).map_err(|e|
@@ -224,24 +221,24 @@ impl<T> ClientCommandSender<T> {
             )
     }
 
-    pub async fn call_ls(&self, path: &str, param: LsParam) -> Result<LsResult, CallRpcMethodError> {
-        self.call_ls_into(path, param).await
+    pub async fn call_ls(&self, path: &str, param: LsParam, timeout: Option<Duration>) -> Result<LsResult, CallRpcMethodError> {
+        self.call_ls_into(path, param, timeout).await
     }
 
-    pub async fn call_ls_exists(&self, path: &str, dirname: &str) -> Result<bool, CallRpcMethodError> {
-        self.call_ls_into(path, LsParam::Exists(dirname.into())).await
+    pub async fn call_ls_exists(&self, path: &str, dirname: &str, timeout: Option<Duration>) -> Result<bool, CallRpcMethodError> {
+        self.call_ls_into(path, LsParam::Exists(dirname.into()), timeout).await
     }
 
-    pub async fn call_ls_list(&self, path: &str) -> Result<Vec<String>, CallRpcMethodError> {
-        self.call_ls_into(path, LsParam::List).await
+    pub async fn call_ls_list(&self, path: &str, timeout: Option<Duration>) -> Result<Vec<String>, CallRpcMethodError> {
+        self.call_ls_into(path, LsParam::List, timeout).await
     }
 
-    async fn call_ls_into<R, E>(&self, path: &str, param: LsParam) -> Result<R, CallRpcMethodError>
+    async fn call_ls_into<R, E>(&self, path: &str, param: LsParam, timeout: Option<Duration>) -> Result<R, CallRpcMethodError>
     where
         R: TryFrom<LsResult, Error = E>,
         E: std::fmt::Display,
     {
-        self.call_rpc_method(path, METH_LS, Some(RpcValue::from(param)))
+        self.call_rpc_method(path, METH_LS, Some(RpcValue::from(param)), timeout)
             .await
             .and_then(|ls_res|
                 R::try_from(ls_res).map_err(|e|
@@ -259,6 +256,7 @@ impl<T> ClientCommandSender<T> {
         path: &str,
         method: &str,
         param: Option<RpcValue>,
+        timeout: Option<Duration>,
     ) -> Result<R, CallRpcMethodError>
     where
         R: TryFrom<RpcValue, Error = E>,
@@ -269,7 +267,7 @@ impl<T> ClientCommandSender<T> {
         };
 
         use CallRpcMethodErrorKind::*;
-        self.do_rpc_call_param(path, method, param)
+        self.do_rpc_call(path, method, param, timeout)
             .map_err(|err| {
                 warn!("Cannot send RPC request to the client core. \
                     Path: `{path}`, method: `{method}`, error: {err}");
@@ -342,6 +340,7 @@ pub enum ClientCommand<T> {
     RpcCall {
         request: RpcMessage,
         response_sender: Sender<RpcFrame>,
+        timeout: Option<Duration>,
     },
     Subscribe {
         ri: ShvRI,
@@ -359,6 +358,123 @@ pub enum ClientCommand<T> {
         path: String,
     },
     TerminateClient,
+}
+
+pub struct RpcCall<'a> {
+    path: &'a str,
+    method: &'a str,
+    param: Option<RpcValue>,
+    timeout: Option<Duration>,
+}
+
+impl<'a> RpcCall<'a> {
+    pub fn new(path: &'a str, method: &'a str) -> Self {
+        Self { path, method, param: None, timeout: None }
+    }
+
+    pub fn param(&mut self, param: impl Into<RpcValue>) -> &mut Self {
+        self.param = Some(param.into());
+        self
+    }
+
+    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub async fn exec<T, R, E>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<R, CallRpcMethodError>
+    where
+        R: TryFrom<RpcValue, Error = E>,
+        E: std::fmt::Display,
+    {
+        client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout).await
+    }
+}
+
+pub struct RpcCallLsList<'a> {
+    path: &'a str,
+    timeout: Option<Duration>,
+}
+
+impl<'a> RpcCallLsList<'a> {
+    pub fn new(path: &'a str) -> Self {
+        Self { path, timeout: None }
+    }
+
+    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<Vec<String>, CallRpcMethodError> {
+        client_cmd_sender.call_ls_list(self.path, self.timeout).await
+    }
+}
+
+pub struct RpcCallLsExists<'a> {
+    path: &'a str,
+    dirname: &'a str,
+    timeout: Option<Duration>,
+}
+
+impl<'a> RpcCallLsExists<'a> {
+    pub fn new(path: &'a str, dirname: &'a str) -> Self {
+        Self { path, dirname, timeout: None }
+    }
+
+    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<bool, CallRpcMethodError> {
+        client_cmd_sender.call_ls_exists(self.path, self.dirname, self.timeout).await
+    }
+}
+
+pub struct RpcCallDirList<'a> {
+    path: &'a str,
+    timeout: Option<Duration>,
+}
+
+impl<'a> RpcCallDirList<'a> {
+    pub fn new(path: &'a str) -> Self {
+        Self { path, timeout: None }
+    }
+
+    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub async fn exec_brief<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+        client_cmd_sender.call_dir_brief(self.path, self.timeout).await
+    }
+
+    pub async fn exec_full<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+        client_cmd_sender.call_dir_full(self.path, self.timeout).await
+    }
+}
+
+pub struct RpcCallDirExists<'a> {
+    path: &'a str,
+    dirname: &'a str,
+    timeout: Option<Duration>,
+}
+
+impl<'a> RpcCallDirExists<'a> {
+    pub fn new(path: &'a str, dirname: &'a str) -> Self {
+        Self { path, dirname, timeout: None }
+    }
+
+    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<bool, CallRpcMethodError> {
+        client_cmd_sender.call_dir_exists(self.path, self.dirname, self.timeout).await
+    }
 }
 
 pub const BROKER_APP_NODE: &str = ".broker/app";
@@ -703,7 +819,8 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
     where
         H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
     {
-        let mut pending_rpc_calls: HashMap<i64, Sender<RpcFrame>> = HashMap::new();
+        let mut rpc_call_timers = FuturesUnordered::new();
+        let mut pending_rpc_calls: HashMap<i64, (Sender<RpcFrame>, oneshot::Sender<_>)> = HashMap::new();
         let mut subscriptions = Subscriptions::new();
         let mut subscription_requests = HashMap::<RqId, u64>::new();
 
@@ -720,8 +837,8 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
 
         async fn check_shv_api_version<T>(client_cmd_tx: ClientCommandSender<T>) -> Result<ShvApiVersion, CallRpcMethodError>
         {
-            let api_version = client_cmd_tx
-                .call_ls_list(".broker")
+            let api_version = RpcCallLsList::new(".broker")
+                .exec(&client_cmd_tx)
                 .await?
                 .iter()
                 .find_map(|node| match node.as_str() {
@@ -743,6 +860,18 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
 
         loop {
             select! {
+                timer_result = rpc_call_timers.select_next_some() => {
+                    if let Some((req_id, duration)) = timer_result {
+                        if let Some((response_sender, _)) = pending_rpc_calls.remove(&req_id) {
+                            if let Ok(mut response) = RpcMessage::new_request("", "", None).prepare_response() {
+                                if let Ok(err_frame) = response
+                                    .set_error(RpcError::new(RpcErrorCode::MethodCallTimeout, format!("No response received within {duration} secs"))).to_frame() {
+                                        response_sender.unbounded_send(err_frame).unwrap_or_default();
+                                }
+                            }
+                        }
+                    }
+                }
                 client_cmd_result = next_client_cmd => match client_cmd_result {
                     Some(client_cmd) => {
                         use ClientCommand::*;
@@ -756,14 +885,46 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                     warn!("Client tries to send an RPC message while a connection to the broker is not established. Message: {message:?}");
                                 }
                             },
-                            RpcCall { request, response_sender } => {
-                                let req_id = request.request_id().expect("request_id in the request of a RpcCall must be set");
-                                if pending_rpc_calls.insert(req_id, response_sender).is_some() {
-                                    error!("Request ID `{req_id}` for async RpcCall has already been registered");
+                            RpcCall { request, response_sender, timeout } => {
+                                match request.request_id() {
+                                    None => {
+                                        if let Ok(mut response) = request.prepare_response() {
+                                            if let Ok(err_frame) = response
+                                                .set_error(RpcError::new(RpcErrorCode::InvalidRequest, "Request ID must be set")).to_frame() {
+                                                    response_sender.unbounded_send(err_frame).unwrap_or_default();
+                                            }
+                                        }
+                                    }
+                                    Some(req_id) => {
+                                        const RPC_CALL_DEFAULT_TIMEOUT_SECS: u64 = 10;
+                                        let (timeout_cancel_tx, mut timeout_cancel_rx) = oneshot::channel();
+                                        rpc_call_timers.push(async move {
+                                            let duration = timeout.unwrap_or_else(|| Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS));
+                                            select! {
+                                                _ = sleep(duration).fuse() => {
+                                                    Some((req_id, duration.as_secs()))
+                                                }
+                                                _ = timeout_cancel_rx => {
+                                                    None
+                                                }
+                                            }
+                                        });
+
+                                        if let Some((old_response_sender, old_timeout_cancel_tx)) = pending_rpc_calls.insert(req_id, (response_sender, timeout_cancel_tx)) {
+                                            error!("Request ID `{req_id}` for async RpcCall has already been registered");
+                                            old_timeout_cancel_tx.send(()).unwrap_or_default();
+                                            if let Ok(mut response) = request.prepare_response() {
+                                                if let Ok(err_frame) = response
+                                                    .set_error(RpcError::new(RpcErrorCode::InternalError, "A request with the same request ID cancelled this call")).to_frame() {
+                                                        old_response_sender.unbounded_send(err_frame).unwrap_or_default();
+                                                }
+                                            }
+                                        }
+                                        client_cmd_tx
+                                            .send_message(request)
+                                            .unwrap_or_else(|e| error!("Cannot send RpcCall command through ClientCommand channel: {e}"));
+                                    }
                                 }
-                                client_cmd_tx
-                                    .send_message(request)
-                                    .unwrap_or_else(|e| error!("Cannot send RpcCall command through ClientCommand channel: {e}"));
                             },
                             Subscribe { ri, subscription_id, notifications_tx } => {
                                 if let Some(api_version) = &shv_api_version {
@@ -908,6 +1069,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                 subscriptions.clear();
                                 subscription_requests.clear();
                                 pending_rpc_calls.clear();
+                                rpc_call_timers.clear();
                                 if let Err(err) = client_events_tx.try_broadcast(ClientEvent::Disconnected) {
                                     error!("Client event `Disconnected` broadcast error: {err}");
                                 }
@@ -948,7 +1110,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
         &self,
         frame: RpcFrame,
         client_cmd_tx: &ClientCommandSender<T>,
-        pending_rpc_calls: &mut HashMap<i64, Sender<RpcFrame>>,
+        pending_rpc_calls: &mut HashMap<i64, (Sender<RpcFrame>, oneshot::Sender<()>)>,
         subscriptions: &mut Subscriptions,
         subscription_requests: &mut HashMap<RqId, u64>,
         api_version: &Option<ShvApiVersion>,
@@ -1004,7 +1166,8 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
             }
         } else if frame.is_response() {
             if let Some(req_id) = frame.request_id() {
-                if let Some(sender) = pending_rpc_calls.remove(&req_id) {
+                if let Some((sender, timeout_cancel)) = pending_rpc_calls.remove(&req_id) {
+                    timeout_cancel.send(()).unwrap_or_default();
                     if sender.unbounded_send(frame.clone()).is_err() {
                         warn!("Response channel closed before received response: {}", &frame);
                     }
@@ -1199,7 +1362,7 @@ mod tests {
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
             let mut resp_rx = cli_cmd_tx
-                .do_rpc_call("path/to/resource", "get")
+                .do_rpc_call("path/to/resource", "get", None, None)
                 .expect("RpcCall command send");
 
             let req = conn_mock.expect_send_message().await;
@@ -1210,13 +1373,31 @@ mod tests {
             assert_eq!(resp.result().unwrap(), &RpcValue::from(42));
         }
 
+        pub(super) async fn call_method_and_receive_error_timeout_response<T>(
+            conn_evt_tx: Sender<ConnectionEvent>,
+            cli_cmd_tx: ClientCommandSender<T>,
+            mut cli_evt_rx: ClientEventsReceiver,
+        ) {
+            let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
+            let mut resp_rx = cli_cmd_tx
+                .do_rpc_call("path/to/resource", "get", None, Some(Duration::from_millis(100)))
+                .expect("RpcCall command send");
+
+            let _req = conn_mock.expect_send_message().await;
+            sleep(Duration::from_millis(200)).await;
+
+            let resp = receive_rpc_msg(&mut resp_rx).await;
+            assert!(resp.is_error());
+            assert_eq!(resp.error().unwrap().code, RpcErrorCode::MethodCallTimeout);
+        }
+
         pub(super) async fn call_method_timeouts_when_disconnected<T>(
             _conn_evt_tx: Sender<ConnectionEvent>,
             cli_cmd_tx: ClientCommandSender<T>,
             mut _cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut resp_rx = cli_cmd_tx
-                .do_rpc_call("path/to/resource", "get")
+                .do_rpc_call("path/to/resource", "get", None, None)
                 .expect("RpcCall command send");
             receive_rpc_msg(&mut resp_rx).timeout(Duration::from_millis(1000)).await.expect_err("Unexpected method call response");
         }
@@ -1829,6 +2010,7 @@ mod tests {
         send_message_fails #[should_panic],
         call_method_timeouts_when_disconnected,
         call_method_and_receive_response,
+        call_method_and_receive_error_timeout_response,
         receive_subscribed_notification_v2,
         do_not_receive_unsubscribed_notification_v2,
         subscribe_and_unsubscribe_v2,
