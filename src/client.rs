@@ -360,6 +360,7 @@ pub enum ClientCommand<T> {
     TerminateClient,
 }
 
+#[derive(Clone,Debug)]
 pub struct RpcCall<'a> {
     path: &'a str,
     method: &'a str,
@@ -372,12 +373,12 @@ impl<'a> RpcCall<'a> {
         Self { path, method, param: None, timeout: None }
     }
 
-    pub fn param(&mut self, param: impl Into<RpcValue>) -> &mut Self {
+    pub fn param(mut self, param: impl Into<RpcValue>) -> Self {
         self.param = Some(param.into());
         self
     }
 
-    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
@@ -391,6 +392,7 @@ impl<'a> RpcCall<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RpcCallLsList<'a> {
     path: &'a str,
     timeout: Option<Duration>,
@@ -401,7 +403,7 @@ impl<'a> RpcCallLsList<'a> {
         Self { path, timeout: None }
     }
 
-    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
@@ -411,6 +413,7 @@ impl<'a> RpcCallLsList<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RpcCallLsExists<'a> {
     path: &'a str,
     dirname: &'a str,
@@ -422,7 +425,7 @@ impl<'a> RpcCallLsExists<'a> {
         Self { path, dirname, timeout: None }
     }
 
-    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
@@ -432,6 +435,7 @@ impl<'a> RpcCallLsExists<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RpcCallDirList<'a> {
     path: &'a str,
     timeout: Option<Duration>,
@@ -442,7 +446,7 @@ impl<'a> RpcCallDirList<'a> {
         Self { path, timeout: None }
     }
 
-    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
@@ -456,24 +460,25 @@ impl<'a> RpcCallDirList<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RpcCallDirExists<'a> {
     path: &'a str,
-    dirname: &'a str,
+    method: &'a str,
     timeout: Option<Duration>,
 }
 
 impl<'a> RpcCallDirExists<'a> {
-    pub fn new(path: &'a str, dirname: &'a str) -> Self {
-        Self { path, dirname, timeout: None }
+    pub fn new(path: &'a str, method: &'a str) -> Self {
+        Self { path, method, timeout: None }
     }
 
-    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
     pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<bool, CallRpcMethodError> {
-        client_cmd_sender.call_dir_exists(self.path, self.dirname, self.timeout).await
+        client_cmd_sender.call_dir_exists(self.path, self.method, self.timeout).await
     }
 }
 
