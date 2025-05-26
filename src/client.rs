@@ -717,14 +717,18 @@ impl private::Sealed for Full { }
 pub struct Client<V: ClientVariant, T> {
     mounts: BTreeMap<String, ClientNode<'static, T>>,
     app_state: Option<AppState<T>>,
+    rpc_call_timeout: Duration,
     variant_marker: PhantomData<V>,
 }
+
+const RPC_CALL_DEFAULT_TIMEOUT_SECS: u64 = 10;
 
 impl Client<Plain, ()> {
     pub fn new_plain() -> Self {
         Self {
             mounts: Default::default(),
             app_state: Default::default(),
+            rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
     }
@@ -741,6 +745,7 @@ impl<T: Send + Sync + 'static> Client<Full, T> {
         Self {
             mounts: Default::default(),
             app_state: Default::default(),
+            rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
     }
@@ -791,6 +796,11 @@ impl<T: Send + Sync + 'static> Client<Full, T> {
 }
 
 impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
+    pub fn rpc_call_timeout(mut self, timeout: Duration) -> Self {
+        self.rpc_call_timeout = timeout;
+        self
+    }
+
     async fn run_with_init_opt<H>(
         &mut self,
         config: &ClientConfig,
@@ -896,13 +906,12 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                         }
                                     }
                                     Some(req_id) => {
-                                        const RPC_CALL_DEFAULT_TIMEOUT_SECS: u64 = 10;
                                         let (timeout_cancel_tx, mut timeout_cancel_rx) = oneshot::channel();
+                                        let timeout = timeout.unwrap_or(self.rpc_call_timeout);
                                         rpc_call_timers.push(async move {
-                                            let duration = timeout.unwrap_or_else(|| Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS));
                                             select! {
-                                                _ = sleep(duration).fuse() => {
-                                                    Some((req_id, duration.as_secs()))
+                                                _ = sleep(timeout).fuse() => {
+                                                    Some((req_id, timeout.as_secs()))
                                                 }
                                                 _ = timeout_cancel_rx => {
                                                     None
