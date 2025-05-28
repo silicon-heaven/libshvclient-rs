@@ -29,7 +29,7 @@ generics-alias = { git = "https://github.com/j4r0u53k/generics-alias-rs.git", br
 
 [dependencies]
 shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", branch = "master", version = "3.3" }
-shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", branch = "master", version = "3.5" }
+shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", branch = "master", version = "3.7" }
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
