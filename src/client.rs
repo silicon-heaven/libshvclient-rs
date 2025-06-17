@@ -435,8 +435,8 @@ impl<'a> RpcCall<'a> {
         self
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
+        self.timeout = Some(timeout.into());
         self
     }
 
@@ -477,8 +477,8 @@ impl<'a> RpcCallLsList<'a> {
         Self { path, timeout: None }
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
+        self.timeout = Some(timeout.into());
         self
     }
 
@@ -499,8 +499,8 @@ impl<'a> RpcCallLsExists<'a> {
         Self { path, dirname, timeout: None }
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
+        self.timeout = Some(timeout.into());
         self
     }
 
@@ -520,8 +520,8 @@ impl<'a> RpcCallDirList<'a> {
         Self { path, timeout: None }
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
+        self.timeout = Some(timeout.into());
         self
     }
 
@@ -546,8 +546,8 @@ impl<'a> RpcCallDirExists<'a> {
         Self { path, method, timeout: None }
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
+        self.timeout = Some(timeout.into());
         self
     }
 
