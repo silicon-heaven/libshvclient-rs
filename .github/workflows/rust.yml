@@ -38,3 +38,10 @@ jobs:
         with:
           project_name: libshvclient
           cargo_test_arguments: --features smol
+
+  check-version-bump:
+    name: Check version bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check version bump
+        uses: syyyr/rust-check-version-bump@ed0644b33a4994450066d35f02905be30e80e627
