@@ -71,7 +71,7 @@ pub(crate) fn process_local_dir_ls<V>(
         // path doesn't exist
         return Some(RequestResult::Error(RpcError::new(
             RpcErrorCode::MethodNotFound,
-            format!("Invalid shv path: {}", shv_path),
+            format!("Invalid shv path: {shv_path}"),
         )));
     }
 
@@ -421,10 +421,7 @@ fn resolve_request_access<T>(request: &RpcMessage, mount_path: &String, client_c
     };
     let mut resp = request.prepare_response()
         .expect("should be able to prepare response");
-    debug!("Check request access on path `{}` / `{}`, error: {}",
-          mount_path,
-          shv_path,
-          err);
+    debug!("Check request access on path `{mount_path}` / `{shv_path}`, error: {err}");
     resp.set_error(err);
     let _ = client_cmd_tx.send_message(resp);
     false
