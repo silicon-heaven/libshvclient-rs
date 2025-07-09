@@ -20,28 +20,28 @@ pub use shvproto::{RpcValue, Value};
 
 
 fn dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: DirParam) -> RpcValue {
-    let mut result = RpcValue::null();
-    let mut lst = rpcvalue::List::new();
-    for mm in methods {
-        match param {
-            DirParam::Brief => {
-                lst.push(mm.to_rpcvalue(metamethod::DirFormat::IMap));
-            }
-            DirParam::Full => {
-                lst.push(mm.to_rpcvalue(metamethod::DirFormat::Map));
-            }
-            DirParam::Exists(ref method_name) => {
-                if mm.name == method_name {
-                    result = mm.to_rpcvalue(metamethod::DirFormat::IMap);
-                    break;
-                }
-            }
+    match param {
+        DirParam::Brief => {
+            methods
+                .into_iter()
+                .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
+                .collect::<Vec<_>>()
+                .into()
         }
-    }
-    if result.is_null() {
-        lst.into()
-    } else {
-        result
+        DirParam::Full => {
+            methods
+                .into_iter()
+                .map(|m| m.to_rpcvalue(metamethod::DirFormat::Map))
+                .collect::<Vec<_>>()
+                .into()
+        }
+        DirParam::Exists(ref method_name) => {
+            methods
+                .into_iter()
+                .find(|m| m.name == method_name)
+                .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
+                .unwrap_or(false.into())
+        }
     }
 }
 
