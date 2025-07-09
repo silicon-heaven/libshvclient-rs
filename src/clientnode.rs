@@ -20,28 +20,28 @@ pub use shvproto::{RpcValue, Value};
 
 
 fn dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: DirParam) -> RpcValue {
-    let mut result = RpcValue::null();
-    let mut lst = rpcvalue::List::new();
-    for mm in methods {
-        match param {
-            DirParam::Brief => {
-                lst.push(mm.to_rpcvalue(metamethod::DirFormat::IMap));
-            }
-            DirParam::Full => {
-                lst.push(mm.to_rpcvalue(metamethod::DirFormat::Map));
-            }
-            DirParam::Exists(ref method_name) => {
-                if mm.name == method_name {
-                    result = mm.to_rpcvalue(metamethod::DirFormat::IMap);
-                    break;
-                }
-            }
+    match param {
+        DirParam::Brief => {
+            methods
+                .into_iter()
+                .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
+                .collect::<Vec<_>>()
+                .into()
         }
-    }
-    if result.is_null() {
-        lst.into()
-    } else {
-        result
+        DirParam::Full => {
+            methods
+                .into_iter()
+                .map(|m| m.to_rpcvalue(metamethod::DirFormat::Map))
+                .collect::<Vec<_>>()
+                .into()
+        }
+        DirParam::Exists(ref method_name) => {
+            methods
+                .into_iter()
+                .find(|m| m.name == method_name)
+                .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
+                .unwrap_or(false.into())
+        }
     }
 }
 
@@ -71,7 +71,7 @@ pub(crate) fn process_local_dir_ls<V>(
         // path doesn't exist
         return Some(RequestResult::Error(RpcError::new(
             RpcErrorCode::MethodNotFound,
-            format!("Invalid shv path: {}", shv_path),
+            format!("Invalid shv path: {shv_path}"),
         )));
     }
 
@@ -421,10 +421,7 @@ fn resolve_request_access<T>(request: &RpcMessage, mount_path: &String, client_c
     };
     let mut resp = request.prepare_response()
         .expect("should be able to prepare response");
-    debug!("Check request access on path `{}` / `{}`, error: {}",
-          mount_path,
-          shv_path,
-          err);
+    debug!("Check request access on path `{mount_path}` / `{shv_path}`, error: {err}");
     resp.set_error(err);
     let _ = client_cmd_tx.send_message(resp);
     false

@@ -99,7 +99,7 @@ impl std::fmt::Display for CallRpcMethodErrorKind {
             CallRpcMethodErrorKind::RpcError(err) => &err.to_string(),
             CallRpcMethodErrorKind::ResultTypeMismatch(msg) => msg,
         };
-        write!(f, "{}", err_msg)
+        write!(f, "{err_msg}")
     }
 }
 

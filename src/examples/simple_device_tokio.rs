@@ -103,7 +103,7 @@ async fn emit_chng_task(
                     client_cmd_tx.mount_node("onfly", shvclient::fixed_node! {
                         device_handler<State>(request, _tx ) {
                             "echo" [IsGetter, Browse, "", ""] (param: RpcValue) => {
-                                println!("echo: {}", param);
+                                println!("echo: {param}");
                                 Some(Ok(param))
                             }
                         }
@@ -171,7 +171,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
     let stateless_node = shvclient::fixed_node!{
         device_handler<State>(request, _tx ) {
             "something" [IsGetter, Browse, "", ""] (param: i32) => {
-                println!("param: {}", param);
+                println!("param: {param}");
                 Some(Ok(RpcValue::from("name result")))
             }
             "setString" [IsSetter, Write, "String", ""] (param: Vec<String>) => {
@@ -183,13 +183,13 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
                         );
                     }
                 }
-                println!("param: {:?}", param);
+                println!("param: {param:?}");
                 Some(Ok(RpcValue::from("name result")))
             }
             "setCustomParam" [IsSetter, Write, "List", ""] (param: Vec<CustomParam>) => {
                 for item in &param {
                     for i in &item.data {
-                        println!("param data: {}", i);
+                        println!("param data: {i}");
                         if i == "foo" {
                             return Some(Ok(().into()));
                         }

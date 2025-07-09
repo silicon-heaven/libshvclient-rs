@@ -78,7 +78,7 @@ enum ConnectionLoopResult {
 async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>) {
     async {
         if let Some(reconnect_interval) = &config.reconnect_interval {
-            info!("Reconnect interval set to: {:?}", reconnect_interval);
+            info!("Reconnect interval set to: {reconnect_interval:?}");
             loop {
                 // Check if the client loop has been terminated before trying to connect.
                 // The client loop termination is then detected in the connection_loop based on
@@ -135,7 +135,7 @@ async fn connection_loop(
     // significantly larger than roundtrip time. The client has to receive at least a response
     // to the heartbeat within this interval.
     let read_timeout = heartbeat_interval * 2;
-    info!("Heartbeat interval set to: {:?}", heartbeat_interval);
+    info!("Heartbeat interval set to: {heartbeat_interval:?}");
 
     let login_params = LoginParams {
         user,
