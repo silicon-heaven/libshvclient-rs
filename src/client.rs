@@ -950,16 +950,13 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
         loop {
             select! {
                 timer_result = rpc_call_timers.select_next_some() => {
-                    if let Some((req_id, duration)) = timer_result {
-                        if let Some((response_sender, _)) = pending_rpc_calls.remove(&req_id) {
-                            if let Ok(mut response) = RpcMessage::new_request("", "", None).prepare_response() {
-                                if let Ok(err_frame) = response
+                    if let Some((req_id, duration)) = timer_result
+                        && let Some((response_sender, _)) = pending_rpc_calls.remove(&req_id)
+                            && let Ok(mut response) = RpcMessage::new_request("", "", None).prepare_response()
+                                && let Ok(err_frame) = response
                                     .set_error(RpcError::new(RpcErrorCode::MethodCallTimeout, format!("No response received within {duration} secs"))).to_frame() {
                                         response_sender.unbounded_send(err_frame).unwrap_or_default();
                                 }
-                            }
-                        }
-                    }
                 }
                 client_cmd_result = next_client_cmd => match client_cmd_result {
                     Some(client_cmd) => {
@@ -977,12 +974,11 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                             RpcCall { request, response_sender, timeout } => {
                                 match request.request_id() {
                                     None => {
-                                        if let Ok(mut response) = request.prepare_response() {
-                                            if let Ok(err_frame) = response
+                                        if let Ok(mut response) = request.prepare_response()
+                                            && let Ok(err_frame) = response
                                                 .set_error(RpcError::new(RpcErrorCode::InvalidRequest, "Request ID must be set")).to_frame() {
                                                     response_sender.unbounded_send(err_frame).unwrap_or_default();
                                             }
-                                        }
                                     }
                                     Some(req_id) => {
                                         // A message passed to the channel updates the timer, the tx drop cancels the timer.
@@ -1006,12 +1002,11 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
 
                                         if let Some((old_response_sender, _)) = pending_rpc_calls.insert(req_id, (response_sender, timer_update_tx)) {
                                             error!("Request ID `{req_id}` for async RpcCall has already been registered");
-                                            if let Ok(mut response) = request.prepare_response() {
-                                                if let Ok(err_frame) = response
+                                            if let Ok(mut response) = request.prepare_response()
+                                                && let Ok(err_frame) = response
                                                     .set_error(RpcError::new(RpcErrorCode::InternalError, "A request with the same request ID cancelled this call")).to_frame() {
                                                         old_response_sender.unbounded_send(err_frame).unwrap_or_default();
                                                 }
-                                            }
                                         }
                                         client_cmd_tx
                                             .send_message(request)
@@ -1035,8 +1030,8 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                             // There is already a subscription with the same RI.
                                             // Do not subscribe it twice, but send Ok response to
                                             // the caller.
-                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response() {
-                                                if let Ok(frame) = response.set_result(()).to_frame() {
+                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response()
+                                                && let Ok(frame) = response.set_result(()).to_frame() {
                                                     notifications_tx.unbounded_send(frame).unwrap_or_default();
                                                     if let Some(subscr) = subscriptions.0
                                                         .iter_mut()
@@ -1044,27 +1039,24 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                                             subscr.confirmed = true;
                                                     }
                                                 }
-                                            }
                                         }
                                         Err(err) => {
                                             // The subscription params are invalid. Send an error frame to the caller.
-                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response() {
-                                                if let Ok(err_frame) = response
+                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response()
+                                                && let Ok(err_frame) = response
                                                     .set_error(RpcError::new(RpcErrorCode::InvalidParam, err)).to_frame() {
                                                         notifications_tx.unbounded_send(err_frame).unwrap_or_default();
                                                 }
-                                            }
                                         }
                                     }
                                 } else {
                                     // Subscribe called before the SHV API version has been
                                     // determined. Send an error frame to the caller.
-                                    if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response() {
-                                        if let Ok(err_frame) = response
+                                    if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response()
+                                        && let Ok(err_frame) = response
                                             .set_error(RpcError::new(RpcErrorCode::InternalError, "Unable to subscribe, because SHV API version is unknown.")).to_frame() {
                                                 notifications_tx.unbounded_send(err_frame).unwrap_or_default();
                                         }
-                                    }
                                 }
                             },
                             Unsubscribe { subscription_id } => {
@@ -1277,16 +1269,15 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                     frame_sender
                         .unbounded_send(frame)
                         .unwrap_or_default();
-                } else if let Some(subscr_id) = subscription_requests.remove(&req_id) {
-                    if let Some(subscr) = subscriptions.0.iter_mut().find(|s| s.subscr_id == subscr_id) {
+                } else if let Some(subscr_id) = subscription_requests.remove(&req_id)
+                    && let Some(subscr) = subscriptions.0.iter_mut().find(|s| s.subscr_id == subscr_id) {
                         send_subscription_frame(subscr, frame);
                         subscr.confirmed = true;
                     }
-                }
             }
-        } else if frame.is_signal() {
-            if let (Some(path), source, signal) = (frame.shv_path(), frame.source(), frame.method()) {
-                if let Ok(notification_ri) = ShvRI::from_path_method_signal(path, source.unwrap_or_default(), signal) {
+        } else if frame.is_signal()
+            && let (Some(path), source, signal) = (frame.shv_path(), frame.source(), frame.method())
+                && let Ok(notification_ri) = ShvRI::from_path_method_signal(path, source.unwrap_or_default(), signal) {
                     if let Some(api_version) = api_version {
                         for subscr in &subscriptions.0 {
                             if subscr.confirmed && subscr.matches(&notification_ri, api_version) {
@@ -1298,8 +1289,6 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                         warn!("Cannot process a notification frame {notification_ri}, because SHV API version is unknown.");
                     }
                 }
-            }
-        }
         Ok(())
     }
 }

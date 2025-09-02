@@ -11,7 +11,7 @@ use shvclient::{MethodsGetter, RequestHandler};
 use shvclient::clientnode::{ClientNode, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver, AppState};
 use simple_logger::SimpleLogger;
-use shvproto::{RpcValue, TryFromRpcValue};
+use shvproto::{RpcValue, FromRpcValue, ToRpcValue};
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -138,7 +138,7 @@ async fn emit_chng_task(
 }
 
 
-#[derive(Default, Clone, TryFromRpcValue)]
+#[derive(Default, Clone, FromRpcValue, ToRpcValue)]
 struct CustomParam {
     data: Vec<String>,
     data2: Vec<RpcValue>,
