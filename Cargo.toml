@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.10.1"
+version = "0.11.0"
 edition = "2024"
 
 [lib]
@@ -59,3 +59,4 @@ default = []
 tokio = ["dep:tokio", "dep:tokio-util"]
 async_std = ["dep:async-std"]
 smol = ["dep:smol"]
+mocking = []

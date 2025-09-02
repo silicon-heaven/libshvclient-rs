@@ -156,6 +156,11 @@ impl<T> Clone for ClientCommandSender<T> {
 }
 
 impl<T> ClientCommandSender<T> {
+    #[cfg(feature = "mocking")]
+    pub fn from_raw(sender: Sender<ClientCommand<T>>) -> Self {
+        Self { sender }
+    }
+
     pub fn terminate_client(&self) {
         self.sender
             .unbounded_send(ClientCommand::TerminateClient)
@@ -640,6 +645,11 @@ impl ClientEventsReceiver {
 
     pub fn recv_event(&mut self) -> Pin<Box<async_broadcast::Recv<'_, ClientEvent>>> {
         self.0.recv()
+    }
+
+    #[cfg(feature = "mocking")]
+    pub fn from_raw(recv: BroadcastReceiver<ClientEvent>) -> Self {
+        Self(recv)
     }
 }
 
