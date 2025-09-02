@@ -134,12 +134,11 @@ pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: impl AsRef<str>) 
                 dir_exists = true;
                 let dir_rest_start = if path.is_empty() { 0 } else { path.len() + 1 };
                 let mut updirs = key[dir_rest_start..].split('/');
-                if let Some(dir) = updirs.next() {
-                    if !dir.is_empty() && !unique_dirs.contains(dir) {
+                if let Some(dir) = updirs.next()
+                    && !dir.is_empty() && !unique_dirs.contains(dir) {
                         dirs.push(dir.to_string());
                         unique_dirs.insert(dir.to_string());
                     }
-                }
             }
         } else {
             break;

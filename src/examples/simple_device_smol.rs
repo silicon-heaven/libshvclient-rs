@@ -185,12 +185,11 @@ fn main() -> shvrpc::Result<()> {
     };
 
     const SMOL_THREADS: &str = "SMOL_THREADS";
-    if std::env::var(SMOL_THREADS).is_err() {
-        if let Ok(num_threads) = std::thread::available_parallelism() {
+    if std::env::var(SMOL_THREADS).is_err()
+        && let Ok(num_threads) = std::thread::available_parallelism() {
             // set_var called before any other threads and smol runtime
             unsafe { std::env::set_var(SMOL_THREADS, num_threads.to_string()); }
         }
-    }
     smol::block_on(async move {
         shvclient::Client::new()
             .app(DotAppNode::new("simple_device_smol"))
