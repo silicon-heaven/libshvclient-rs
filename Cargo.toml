@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.11.0"
+version = "0.11.1"
 edition = "2024"
 
 [lib]
@@ -9,17 +9,17 @@ path = "src/lib.rs"
 
 [[example]]
 name = "simple_device_tokio"
-path = "src/examples/simple_device_tokio.rs"
+path = "examples/simple_device_tokio.rs"
 required-features = ["tokio"]
 
 [[example]]
 name = "simple_device_async_std"
-path = "src/examples/simple_device_async_std.rs"
+path = "examples/simple_device_async_std.rs"
 required-features = ["async_std"]
 
 [[example]]
 name = "simple_device_smol"
-path = "src/examples/simple_device_smol.rs"
+path = "examples/simple_device_smol.rs"
 required-features = ["smol"]
 
 [dev-dependencies]
