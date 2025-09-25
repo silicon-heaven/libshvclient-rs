@@ -181,9 +181,17 @@ async fn connection_loop(
 
     async {
         let mut fut_heartbeat_timeout = futures_time::task::sleep(heartbeat_interval.into()).fuse();
-        let mut fut_read_timeout = futures_time::task::sleep(read_timeout.into()).fuse();
         let mut conn_cmd_receiver = conn_cmd_receiver.fuse();
-        let mut fut_receive_frame = frame_reader.receive_frame().fuse();
+        let mut frame_stream = std::pin::pin!(futures::stream::unfold(frame_reader, async |mut reader| {
+            use futures_time::future::FutureExt;
+            let frame_res = reader
+                .receive_frame()
+                .timeout(futures_time::time::Duration::from(read_timeout))
+                .await
+                .map_err(|_| shvrpc::framerw::ReceiveFrameError::Timeout)
+                .flatten();
+            Some((frame_res, reader))
+        }));
 
         loop {
             select! {
@@ -216,34 +224,24 @@ async fn connection_loop(
                         },
                     }
                 }
-                _ = fut_read_timeout => {
-                    warn!("Connection timed out, no data received for {}", read_timeout.human_format());
-                    conn_event_sender
-                        .unbounded_send(ConnectionEvent::Disconnected)
-                        .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
-                    return ConnectionLoopResult::ConnectionClosed;
-                }
-                receive_frame_result = fut_receive_frame => {
+                receive_frame_result = frame_stream.select_next_some() => {
                     match receive_frame_result {
                         Ok(frame) => {
-                            fut_read_timeout = futures_time::task::sleep(read_timeout.into()).fuse();
                             conn_event_sender
                                 .unbounded_send(ConnectionEvent::RpcFrameReceived(frame))
                                 .unwrap_or_else(|e| debug!("ConnectionEvent::RpcFrameReceived send failed: {e}"));
                         }
                         Err(e) => {
                             warn!("Receive frame error: {e}");
+                            if matches!(e, shvrpc::framerw::ReceiveFrameError::Timeout) {
+                                warn!("Connection timed out, no data received for {}", read_timeout.human_format());
+                            }
                             conn_event_sender
                                 .unbounded_send(ConnectionEvent::Disconnected)
                                 .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
                             return ConnectionLoopResult::ConnectionClosed;
                         }
                     }
-                    // The drop before the reassignment is needed because the future is holding
-                    // &mut frame_reader until it is dropped, therefore it cannot be borrowed
-                    // again on the rhs of the assignment.
-                    drop(fut_receive_frame);
-                    fut_receive_frame = frame_reader.receive_frame().fuse();
                 }
             }
         }
