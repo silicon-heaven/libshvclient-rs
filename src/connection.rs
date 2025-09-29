@@ -4,10 +4,11 @@ use futures::{select, FutureExt, StreamExt};
 use log::*;
 pub use shvrpc::client::ClientConfig;
 use shvrpc::client::LoginParams;
-use shvrpc::framerw::{FrameReader, FrameWriter};
+use shvrpc::framerw::{FrameReader, FrameWriter, ReceiveFrameError};
 use shvrpc::rpcframe::RpcFrame;
+use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::util::login_from_url;
-use shvrpc::{client, RpcMessage};
+use shvrpc::{client, RpcMessage, RpcMessageMetaTags};
 #[cfg(any(feature = "async_std" ,feature = "smol"))]
 use futures::AsyncReadExt;
 
@@ -188,7 +189,7 @@ async fn connection_loop(
                 .receive_frame()
                 .timeout(futures_time::time::Duration::from(read_timeout))
                 .await
-                .map_err(|_| shvrpc::framerw::ReceiveFrameError::Timeout)
+                .map_err(|_| shvrpc::framerw::ReceiveFrameError::Timeout(None))
                 .flatten();
             Some((frame_res, reader))
         }));
@@ -231,15 +232,71 @@ async fn connection_loop(
                                 .unbounded_send(ConnectionEvent::RpcFrameReceived(frame))
                                 .unwrap_or_else(|e| debug!("ConnectionEvent::RpcFrameReceived send failed: {e}"));
                         }
-                        Err(e) => {
-                            warn!("Receive frame error: {e}");
-                            if matches!(e, shvrpc::framerw::ReceiveFrameError::Timeout) {
-                                warn!("Connection timed out, no data received for {}", read_timeout.human_format());
+                        Err(err) => {
+                            warn!("Receive frame error: {err}");
+                            match &err {
+                                ReceiveFrameError::FrameTooLarge(reason, Some(meta_map)) => {
+                                    if meta_map.is_response() {
+                                        // Forward the response as an error to the client
+                                        let mut msg = RpcMessage::from_meta(meta_map.clone());
+                                        msg.set_error(RpcError::new(RpcErrorCode::MethodCallCancelled, reason));
+                                        if let Ok(frame) = msg.to_frame() {
+                                            conn_event_sender
+                                                .unbounded_send(ConnectionEvent::RpcFrameReceived(frame))
+                                                .unwrap_or_else(|e| debug!("ConnectionEvent::RpcFrameReceived send failed: {e}"));
+                                        }
+                                    } else if meta_map.is_request() {
+                                        // Send error response to the caller
+                                        if let Ok(mut msg) = RpcMessage::prepare_response_from_meta(meta_map) {
+                                            msg.set_error(RpcError::new(RpcErrorCode::MethodCallCancelled, reason));
+                                            // reset heartbeat timer
+                                            fut_heartbeat_timeout = futures_time::task::sleep(heartbeat_interval.into()).fuse();
+                                            if let Err(err) = writer_tx.unbounded_send(msg) {
+                                                warn!("Cannot send message to the writer task: {err}");
+                                                conn_event_sender
+                                                    .unbounded_send(ConnectionEvent::Disconnected)
+                                                    .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
+                                                return ConnectionLoopResult::ConnectionClosed;
+                                            }
+                                        }
+                                    }
+                                }
+                                ReceiveFrameError::Timeout(Some(meta_map)) => {
+                                    if meta_map.is_response() {
+                                        // Forward the response as an error to the client
+                                        let mut msg = RpcMessage::from_meta(meta_map.clone());
+                                        msg.set_error(RpcError::new(RpcErrorCode::MethodCallTimeout, "Could not receive complete response within the time limit"));
+                                        if let Ok(frame) = msg.to_frame() {
+                                            conn_event_sender
+                                                .unbounded_send(ConnectionEvent::RpcFrameReceived(frame))
+                                                .unwrap_or_else(|e| debug!("ConnectionEvent::RpcFrameReceived send failed: {e}"));
+                                        }
+                                    } else if meta_map.is_request() {
+                                        // Send error response to the caller
+                                        if let Ok(mut msg) = RpcMessage::prepare_response_from_meta(meta_map) {
+                                            msg.set_error(RpcError::new(RpcErrorCode::MethodCallTimeout, "Could not receive complete request within the time limit"));
+                                            // reset heartbeat timer
+                                            fut_heartbeat_timeout = futures_time::task::sleep(heartbeat_interval.into()).fuse();
+                                            if let Err(err) = writer_tx.unbounded_send(msg) {
+                                                warn!("Cannot send message to the writer task: {err}");
+                                                conn_event_sender
+                                                    .unbounded_send(ConnectionEvent::Disconnected)
+                                                    .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
+                                                return ConnectionLoopResult::ConnectionClosed;
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    if matches!(err, ReceiveFrameError::Timeout(None)) {
+                                        warn!("Connection timed out, no data received for {}",read_timeout.human_format());
+                                    }
+                                    conn_event_sender
+                                        .unbounded_send(ConnectionEvent::Disconnected)
+                                        .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
+                                    return ConnectionLoopResult::ConnectionClosed;
+                                }
                             }
-                            conn_event_sender
-                                .unbounded_send(ConnectionEvent::Disconnected)
-                                .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
-                            return ConnectionLoopResult::ConnectionClosed;
                         }
                     }
                 }
