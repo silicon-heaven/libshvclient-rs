@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.12.1"
+version = "1.0.0"
 edition = "2024"
 
 [lib]
@@ -44,6 +44,9 @@ smol = { version = "2.0.2", optional = true }
 # NOTE: macro_magic needs to be here as a direct dependency because some functions from
 # there are called in expansion of `generics_inner` macro from generics-alias crate.
 macro_magic = "0.6.0"
+futures-rustls = "0.26.0"
+rustls-pemfile = "2.2.0"
+rustls-platform-verifier = "0.6.1"
 
 
 # For local development
