@@ -39,13 +39,7 @@ fn build_tls_connector(url: &url::Url) -> shvrpc::Result<futures_rustls::TlsConn
 }
 
 pub fn spawn_connection_task(config: &ClientConfig, conn_evt_tx: Sender<ConnectionEvent>) {
-    let task = connection_task(config.clone(), conn_evt_tx);
-    #[cfg(feature = "tokio")]
-    tokio::spawn(task);
-    #[cfg(feature = "async_std")]
-    async_std::task::spawn(task);
-    #[cfg(feature = "smol")]
-    smol::spawn(task).detach();
+    crate::runtime::spawn_task(connection_task(config.clone(), conn_evt_tx)).detach();
 }
 
 pub(crate) trait AsyncReadWrite: AsyncRead + AsyncWrite {}
