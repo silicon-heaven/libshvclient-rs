@@ -22,6 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install -y libudev-dev pkg-config
       - name: Clippy (${{ matrix.feature }})
         run: cargo clippy --all-targets --features ${{ matrix.feature }}
       - name: Build (${{ matrix.feature }})
@@ -33,6 +37,10 @@ jobs:
     name: Code coverage
     runs-on: ubuntu-latest
     steps:
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install -y libudev-dev pkg-config
       - name: Generate coverage
         uses: syyyr/rust-pycobertura-action@v2.0.0
         with:

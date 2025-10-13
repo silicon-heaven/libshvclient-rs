@@ -1,7 +1,12 @@
+use std::sync::Arc;
+
 pub use crate::client::Sender;
 use duration_str::HumanFormat;
-use futures::{select, FutureExt, StreamExt};
+use futures::{select, AsyncRead, AsyncWrite, FutureExt, StreamExt};
+use futures_rustls::pki_types::ServerName;
+use futures_rustls::TlsConnector;
 use log::*;
+use rustls_platform_verifier::BuilderVerifierExt;
 pub use shvrpc::client::ClientConfig;
 use shvrpc::client::LoginParams;
 use shvrpc::framerw::{FrameReader, FrameWriter, ReceiveFrameError};
@@ -9,48 +14,58 @@ use shvrpc::rpcframe::RpcFrame;
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::util::login_from_url;
 use shvrpc::{client, RpcMessage, RpcMessageMetaTags};
-#[cfg(any(feature = "async_std" ,feature = "smol"))]
 use futures::AsyncReadExt;
+use futures_rustls::rustls::ClientConfig as TlsClientConfig;
 
-pub fn spawn_connection_task(config: &ClientConfig, conn_evt_tx: Sender<ConnectionEvent>) {
-    let task = connection_task(config.clone(), conn_evt_tx);
-    #[cfg(feature = "tokio")]
-    tokio::spawn(task);
-    #[cfg(feature = "async_std")]
-    async_std::task::spawn(task);
-    #[cfg(feature = "smol")]
-    smol::spawn(task).detach();
+fn build_tls_connector(url: &url::Url) -> shvrpc::Result<futures_rustls::TlsConnector> {
+    let crypto_provider = Arc::new(futures_rustls::rustls::crypto::aws_lc_rs::default_provider());
+    if let Some((_, ca_path)) = url.query_pairs().find(|(k, _)| k == "ca") {
+        let ca_certs = rustls_pemfile::certs(&mut std::io::BufReader::new(std::fs::File::open(ca_path.as_ref())?))
+            .collect::<Result<Vec<_>,_>>()?;
+        let mut root_store = futures_rustls::rustls::RootCertStore::empty();
+        root_store.add_parsable_certificates(ca_certs);
+        let client_config = TlsClientConfig::builder_with_provider(crypto_provider)
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        Ok(futures_rustls::TlsConnector::from(Arc::new(client_config)))
+    } else {
+        let client_config = TlsClientConfig::builder_with_provider(crypto_provider)
+            .with_safe_default_protocol_versions()?
+            .with_platform_verifier()?
+            .with_no_client_auth();
+        Ok(futures_rustls::TlsConnector::from(Arc::new(client_config)))
+    }
 }
 
-async fn connect(address: &str)
-    -> shvrpc::Result<(
-        Box<dyn futures::AsyncRead + Send + Unpin>,
-        Box<dyn futures::AsyncWrite + Send + Unpin>
-    )>
+pub fn spawn_connection_task(config: &ClientConfig, conn_evt_tx: Sender<ConnectionEvent>) {
+    crate::runtime::spawn_task(connection_task(config.clone(), conn_evt_tx)).detach();
+}
+
+pub(crate) trait AsyncReadWrite: AsyncRead + AsyncWrite {}
+impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
+
+async fn connect(address: &str, tls: &Option<(Arc<TlsConnector>, ServerName<'static>)>)
+-> shvrpc::Result<Box<dyn AsyncReadWrite + Send + Unpin>>
 {
     #[cfg(feature = "tokio")]
-    {
-        use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-        let stream = tokio::net::TcpStream::connect(address).await?;
-        let (reader, writer) = stream.into_split();
-        let writer = writer.compat_write();
-        let reader = tokio::io::BufReader::new(reader).compat();
-        Ok((Box::new(reader), Box::new(writer)))
-    }
+    let stream = tokio_util::compat::TokioAsyncReadCompatExt::compat(
+        tokio::net::TcpStream::connect(address).await?
+    );
+
     #[cfg(feature = "async_std")]
-    {
-        let stream = async_std::net::TcpStream::connect(address).await?;
-        let (reader, writer) = stream.split();
-        let reader = futures::io::BufReader::new(reader);
-        Ok((Box::new(reader), Box::new(writer)))
-    }
+    let stream = async_std::net::TcpStream::connect(address).await?;
+
     #[cfg(feature = "smol")]
-    {
-        let stream = smol::net::TcpStream::connect(address).await?;
-        let (reader, writer) = stream.split();
-        let reader = futures::io::BufReader::new(reader);
-        Ok((Box::new(reader), Box::new(writer)))
-    }
+    let stream = smol::net::TcpStream::connect(address).await?;
+
+    Ok(if let Some((tls_connector, server_name)) = tls {
+        Box::new(tls_connector
+            .connect(server_name.clone(), stream)
+            .await?)
+    } else {
+        Box::new(stream)
+    })
 }
 
 #[derive(Debug,Clone)]
@@ -78,6 +93,18 @@ enum ConnectionLoopResult {
 
 async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>) {
     async {
+        let tls = if config.url.scheme() == "ssl" {
+            let tls_connector = Arc::new(build_tls_connector(&config.url)
+                .unwrap_or_else(|err| panic!("Cannot initialize TLS: {err}"))
+            );
+            let server_name = futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
+                .unwrap_or_else(|err| panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str()))
+                .to_owned();
+            Some((tls_connector, server_name))
+        } else {
+            None
+        };
+
         if let Some(reconnect_interval) = &config.reconnect_interval {
             info!("Reconnect interval set to: {reconnect_interval:?}");
             loop {
@@ -88,7 +115,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
                     warn!("conn_event_sender is closed");
                     break;
                 }
-                match connection_loop(&config, &conn_event_sender).await {
+                match connection_loop(&config, &tls, &conn_event_sender).await {
                     ConnectionLoopResult::ClientTerminated => break,
                     ConnectionLoopResult::ConnectionClosed => {
                         info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
@@ -97,7 +124,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
                 }
             }
         } else {
-            connection_loop(&config, &conn_event_sender).await;
+            connection_loop(&config, &tls, &conn_event_sender).await;
         }
     }
     .await;
@@ -107,6 +134,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
 
 async fn connection_loop(
     config: &ClientConfig,
+    tls: &Option<(Arc<TlsConnector>, ServerName<'static>)>,
     conn_event_sender: &Sender<ConnectionEvent>,
 ) -> ConnectionLoopResult {
     let (host, port) = (
@@ -117,8 +145,11 @@ async fn connection_loop(
 
     // Establish a connection
     info!("Connecting to: {address}");
-    let (mut frame_reader, mut frame_writer) = match connect(&address).await {
-        Ok((rd, wr)) => (shvrpc::streamrw::StreamFrameReader::new(rd), shvrpc::streamrw::StreamFrameWriter::new(wr)),
+    let (mut frame_reader, mut frame_writer) = match connect(&address, tls).await {
+        Ok(stream) =>{
+            let (rd, wr) = stream.split();
+            (shvrpc::streamrw::StreamFrameReader::new(futures::io::BufReader::new(rd)), shvrpc::streamrw::StreamFrameWriter::new(wr))
+        }
         Err(err) => {
             warn!("Cannot connect to {address}: {err}");
             conn_event_sender
