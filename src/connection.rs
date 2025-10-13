@@ -94,18 +94,13 @@ enum ConnectionLoopResult {
 async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>) {
     async {
         let tls = if config.url.scheme() == "ssl" {
-            Some((
-                    Arc::new(build_tls_connector(&config.url)
-                        .unwrap_or_else(|err|
-                            panic!("Cannot initialize TLS: {err}")
-                        )
-                    ),
-                    futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
-                    .unwrap_or_else(|err|
-                        panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str())
-                    )
-                    .to_owned()
-            ))
+            let tls_connector = Arc::new(build_tls_connector(&config.url)
+                .unwrap_or_else(|err| panic!("Cannot initialize TLS: {err}"))
+            );
+            let server_name = futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
+                .unwrap_or_else(|err| panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str()))
+                .to_owned();
+            Some((tls_connector, server_name))
         } else {
             None
         };
