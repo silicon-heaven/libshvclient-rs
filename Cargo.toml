@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.13.0"
+version = "0.13.1"
 edition = "2024"
 
 [lib]
@@ -37,8 +37,8 @@ smol = "2.0.2"
 anyhow = "1.0.100"
 
 [dependencies]
-shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", branch = "master", version = "3.5" }
-shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", branch = "master", version = "3.9" }
+shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", tag = "3.6.2" }
+shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", tag = "3.11.3" }
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
