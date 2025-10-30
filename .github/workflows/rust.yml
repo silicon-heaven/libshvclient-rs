@@ -53,3 +53,27 @@ jobs:
     steps:
       - name: Check version bump
         uses: syyyr/rust-check-version-bump@ed0644b33a4994450066d35f02905be30e80e627
+
+  tag-release:
+    name: Tag Release
+    if: github.ref == 'refs/heads/main'
+    needs: [build, check-version-bump]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from Cargo.toml
+        id: get-version
+        run: |
+          version="$(grep '^version' Cargo.toml | head -n1 | sed 's/version\s*=\s*"\(.*\)"/\1/')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        uses: rickstaa/action-create-tag@v1
+        with:
+          tag: ${{ steps.get-version.outputs.version }}
