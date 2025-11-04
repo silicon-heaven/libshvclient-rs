@@ -26,3 +26,7 @@ pub use client::{
 };
 pub use clientnode::Route;
 pub use connection::ConnectionFailedKind;
+
+// Reexport for version compatibility
+pub use shvproto;
+pub use shvrpc;
