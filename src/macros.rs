@@ -64,16 +64,16 @@ macro_rules! fixed_node {
                 },)+
             ];
 
-            async fn $fn_name($request: ::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: Option<$crate::AppState<$T>>)?) {
+            async fn $fn_name($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: Option<$crate::AppState<$T>>)?) {
 
-                use shvrpc::RpcMessageMetaTags;
+                use $crate::shvrpc::RpcMessageMetaTags;
 
                 if $request.shv_path().unwrap_or_default().is_empty() {
                     let mut __resp = $request.prepare_response().unwrap_or_default();
                     $(
                         let Some($app_state) = $app_state else {
                             log::error!("{}: Application state should be Some", stringify!($fn_name));
-                            __resp.set_error(shvrpc::rpcmessage::RpcError::new(shvrpc::rpcmessage::RpcErrorCode::InternalError, "Ill-formed method implementation"));
+                            __resp.set_error($crate::shvrpc::rpcmessage::RpcError::new($crate::shvrpc::rpcmessage::RpcErrorCode::InternalError, "Ill-formed method implementation"));
                             if let Err(e) = $client_cmd_tx.send_message(__resp) {
                                 log::error!("{}: Cannot send response ({e})", stringify!($fn_name));
                             }
@@ -81,7 +81,7 @@ macro_rules! fixed_node {
                         };
                     )?
 
-                    async fn handler($request: ::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: $crate::AppState<$T>)?)
+                    async fn handler($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: $crate::AppState<$T>)?)
                     -> Option<std::result::Result<$crate::clientnode::RpcValue, $crate::clientnode::RpcError>> {
                         match $request.method() {
 
