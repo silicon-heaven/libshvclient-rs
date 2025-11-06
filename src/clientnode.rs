@@ -7,10 +7,11 @@ use crate::AppState;
 use log::{error, debug};
 use shvrpc::rpcdiscovery::{DirParam, LsParam};
 use shvrpc::rpcframe::RpcFrame;
+use shvrpc::util::{children_on_path, find_longest_path_prefix};
 use shvrpc::{metamethod, RpcMessage, RpcMessageMetaTags};
 use shvproto::rpcvalue;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::format;
 use std::sync::Arc;
 // Reexport for use in the macros
@@ -122,74 +123,6 @@ fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> Reque
                     RequestResult::Response(dirs.contains(&path).into()),
             }
     }
-}
-pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: impl AsRef<str>) -> Option<Vec<String>> {
-    let path = path.as_ref();
-    let mut dirs: Vec<String> = Vec::new();
-    let mut unique_dirs: HashSet<String> = HashSet::new();
-    let mut dir_exists = mounts.contains_key(path);
-    for (key, _) in mounts.range(path.to_owned()..) {
-        if key.starts_with(path) {
-            if path.is_empty() || (key.len() > path.len() && key.as_bytes()[path.len()] == (b'/')) {
-                dir_exists = true;
-                let dir_rest_start = if path.is_empty() { 0 } else { path.len() + 1 };
-                let mut updirs = key[dir_rest_start..].split('/');
-                if let Some(dir) = updirs.next()
-                    && !dir.is_empty() && !unique_dirs.contains(dir) {
-                        dirs.push(dir.to_string());
-                        unique_dirs.insert(dir.to_string());
-                    }
-            }
-        } else {
-            break;
-        }
-    }
-    if dir_exists {
-        Some(dirs)
-    } else {
-        None
-    }
-}
-
-/// Helper trait for uniform access to some common methods of BTreeMap<String, V> and HashMap<String, V>
-pub trait StringMapView<V> {
-    fn contains_key_(&self, key: &str) -> bool;
-}
-
-impl<V> StringMapView<V> for BTreeMap<String, V> {
-    fn contains_key_(&self, key: &str) -> bool {
-        self.contains_key(key)
-    }
-}
-
-impl<V> StringMapView<V> for HashMap<String, V> {
-    fn contains_key_(&self, key: &str) -> bool {
-        self.contains_key(key)
-    }
-}
-
-pub fn find_longest_path_prefix<'a, V>(
-    map: &impl StringMapView<V>,
-    shv_path: &'a str,
-) -> Option<(&'a str, &'a str)> {
-    let mut path = shv_path;
-    let mut rest = "";
-    loop {
-        if map.contains_key_(path) {
-            return Some((path, rest));
-        }
-        if path.is_empty() {
-            break;
-        }
-        if let Some(slash_ix) = path.rfind('/') {
-            path = &shv_path[..slash_ix];
-            rest = &shv_path[(slash_ix + 1)..];
-        } else {
-            path = "";
-            rest = shv_path;
-        };
-    }
-    None
 }
 
 pub struct Route<T> {
@@ -519,39 +452,6 @@ pub const PROPERTY_METHODS: [&MetaMethod; 3] = [
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ls_mounts() {
-        let mut mounts = BTreeMap::new();
-        mounts.insert("".into(), ());
-        mounts.insert("a".into(), ());
-        mounts.insert("a/1".into(), ());
-        mounts.insert("a/123".into(), ());
-        mounts.insert("a/xyz".into(), ());
-        mounts.insert("b/2/C".into(), ());
-        mounts.insert("b/2/D".into(), ());
-        mounts.insert("b/3/E".into(), ());
-        assert_eq!(
-            super::children_on_path(&mounts, ""),
-            Some(vec!["a".to_string(), "b".to_string()])
-        );
-        assert_eq!(
-            super::children_on_path(&mounts, "a"),
-            Some(vec!["1".to_string(), "123".to_string(), "xyz".to_string()])
-        );
-        assert_eq!(
-            super::children_on_path(&mounts, "a/1"),
-            Some(vec![])
-        );
-        assert_eq!(
-            super::children_on_path(&mounts, "a/xy"),
-            None
-        );
-        assert_eq!(
-            super::children_on_path(&mounts, "b/2"),
-            Some(vec!["C".to_string(), "D".to_string()])
-        );
-    }
 
     async fn dummy_handler(_: RpcMessage, _: ClientCommandSender<()>, _: Option<AppState<()>>) {}
 

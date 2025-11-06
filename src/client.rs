@@ -1,5 +1,5 @@
 use crate::connection::{spawn_connection_task, ConnectionCommand, ConnectionEvent, ConnectionFailedKind};
-use crate::clientnode::{find_longest_path_prefix, process_local_dir_ls, ClientNode, RequestResult, Route, METH_DIR, METH_LS, METH_PING};
+use crate::clientnode::{process_local_dir_ls, ClientNode, RequestResult, Route, METH_DIR, METH_LS, METH_PING};
 use async_broadcast::RecvError;
 use futures::future::BoxFuture;
 use futures::stream::{self, FuturesUnordered};
@@ -14,6 +14,7 @@ use shvrpc::rpc::{Glob, ShvRI, SubscriptionParam};
 use shvrpc::rpcdiscovery::{DirParam, DirResult, LsParam, LsResult, MethodInfo};
 use shvrpc::rpcframe::RpcFrame;
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode, RqId};
+use shvrpc::util::find_longest_path_prefix;
 use shvrpc::{RpcMessage, RpcMessageMetaTags};
 use shvproto::RpcValue;
 use std::borrow::Cow;
