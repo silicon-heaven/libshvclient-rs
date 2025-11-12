@@ -1500,7 +1500,7 @@ mod tests {
 
             let resp = receive_rpc_msg(&mut resp_rx).await;
             assert!(resp.is_error());
-            assert_eq!(resp.error().unwrap().code, RpcErrorCode::MethodCallTimeout);
+            assert_eq!(resp.error().unwrap().code, RpcErrorCode::MethodCallTimeout.into());
         }
 
         pub(super) async fn call_method_and_receive_delay<T>(
@@ -2011,22 +2011,22 @@ mod tests {
                 let request = RpcMessage::new_request("dynamic/a", "dir", None);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
-                assert_eq!(response.code, RpcErrorCode::MethodNotFound);
+                assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
                 let request = RpcMessage::new_request("dynamic/sync", "bar", None);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
-                assert_eq!(response.code, RpcErrorCode::MethodNotFound);
+                assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
                 let request = RpcMessage::new_request("static/none", "dir", None);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
-                assert_eq!(response.code, RpcErrorCode::MethodNotFound);
+                assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
                 let request = RpcMessage::new_request("static", "foo", None);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
-                assert_eq!(response.code, RpcErrorCode::MethodNotFound);
+                assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
             }
 
             {
@@ -2034,7 +2034,7 @@ mod tests {
                 let request = RpcMessage::new_request("dynamic/async", "dir", None);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
-                assert_eq!(response.code, RpcErrorCode::InvalidRequest);
+                assert_eq!(response.code, RpcErrorCode::InvalidRequest.into());
             }
 
             {
@@ -2065,17 +2065,17 @@ mod tests {
                 let mut request = RpcMessage::new_request("static", "set", None);
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied);
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
 
                 let mut request = RpcMessage::new_request("dynamic/sync", "set", None);
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied);
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
 
                 let mut request = RpcMessage::new_request("dynamic/async", "get", None);
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied);
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
             }
         }
     }
