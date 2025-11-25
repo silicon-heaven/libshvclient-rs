@@ -81,15 +81,17 @@ fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
 
 const METH_GET_DELAYED: &str = "getDelayed";
 
-const DELAY_METHODS: &[MetaMethod] = &[MetaMethod {
-    name: METH_GET_DELAYED,
-    flags: Flag::IsGetter as u32,
-    access: shvrpc::metamethod::AccessLevel::Browse,
-    param: "",
-    result: "",
-    signals: &[],
-    description: "",
-}];
+const DELAY_METHODS: &[MetaMethod] = &[
+    MetaMethod::new_static(
+        METH_GET_DELAYED,
+        Flag::IsGetter as u32,
+        shvrpc::metamethod::AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    )
+];
 
 type State = RwLock<i32>;
 

@@ -14,42 +14,42 @@ const SHV_VERSION_MAJOR: i32 = 3;
 const SHV_VERSION_MINOR: i32 = 0;
 
 pub const DOT_APP_METHODS: &[&MetaMethod] = &[
-    &MetaMethod {
-        name: METH_SHV_VERSION_MAJOR,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
-    &MetaMethod {
-        name: METH_SHV_VERSION_MINOR,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
-    &MetaMethod {
-        name: METH_NAME,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
-    &MetaMethod {
-        name: METH_PING,
-        flags: Flag::None as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
+    &MetaMethod::new_static(
+        METH_SHV_VERSION_MAJOR,
+        Flag::IsGetter as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
+    &MetaMethod::new_static(
+        METH_SHV_VERSION_MINOR,
+        Flag::IsGetter as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
+    &MetaMethod::new_static(
+        METH_NAME,
+        Flag::IsGetter as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
+    &MetaMethod::new_static(
+        METH_PING,
+        Flag::None as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
 ];
 
 pub struct DotAppNode {
@@ -85,33 +85,33 @@ impl ConstantNode for DotAppNode {
 }
 
 pub const DOT_DEVICE_METHODS: &[&MetaMethod] = &[
-    &MetaMethod {
-        name: METH_NAME,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
-    &MetaMethod {
-        name: METH_VERSION,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
-    &MetaMethod {
-        name: METH_SERIAL_NUMBER,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Browse,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    },
+    &MetaMethod::new_static(
+        METH_NAME,
+        Flag::IsGetter as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
+    &MetaMethod::new_static(
+        METH_VERSION,
+        Flag::IsGetter as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
+    &MetaMethod::new_static(
+        METH_SERIAL_NUMBER,
+        Flag::IsGetter as u32,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
 ];
 
 pub struct DotDeviceNode {

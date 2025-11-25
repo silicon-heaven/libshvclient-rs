@@ -53,15 +53,15 @@ macro_rules! fixed_node {
 
         {
             const METHODS: &[$crate::clientnode::MetaMethod] = &[
-                $($crate::clientnode::MetaMethod {
-                    name: $method,
-                    flags: $($crate::clientnode::Flag::$flags as u32)|+,
-                    access: $crate::clientnode::AccessLevel::$access,
-                    param: $methodparam,
-                    result: $methodresult,
-                    signals: &[$($(($signame, $sigval)),*)?],
-                    description: "",
-                },)+
+                $($crate::clientnode::MetaMethod::new_static(
+                    $method,
+                    $($crate::clientnode::Flag::$flags as u32)|+,
+                    $crate::clientnode::AccessLevel::$access,
+                    $methodparam,
+                    $methodresult,
+                    &[$($(($signame, $sigval)),*)?],
+                    "",
+                ),)+
             ];
 
             async fn $fn_name($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: Option<$crate::AppState<$T>>)?) {
