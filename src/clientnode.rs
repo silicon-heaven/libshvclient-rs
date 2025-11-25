@@ -263,7 +263,7 @@ impl<'a, T: Send + Sync + 'static> ClientNode<'a, T> {
                 let shv_path = request.shv_path().unwrap_or_default().to_owned();
                 let node = node.clone();
                 spawn_task(async move {
-                    let methods = node.methods.0(shv_path, app_state.clone()).await
+                    let methods = node.methods.0(shv_path, client_cmd_tx.clone(), app_state.clone()).await
                         .map_or_else(
                             || Cow::from(&[]),
                             |m| if m.is_empty() {
