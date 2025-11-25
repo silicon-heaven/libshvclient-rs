@@ -39,7 +39,7 @@ fn dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: DirParam) -
         DirParam::Exists(ref method_name) => {
             methods
                 .into_iter()
-                .find(|m| m.name == method_name)
+                .find(|m| m.name.as_ref() == method_name)
                 .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
                 .unwrap_or(false.into())
         }
@@ -176,14 +176,14 @@ impl<'a, T> FixedNode<'a, T> {
             route.methods.iter().for_each(|m| {
                 methods
                     .iter()
-                    .find(|dm| dm.name == m && !is_signal(dm))
+                    .find(|dm| dm.name.as_ref() == m && !is_signal(dm))
                     .unwrap_or_else(|| panic!("Invalid method {m}"));
                 handlers.insert(m.clone(), handler.clone());
             });
         }
         if let Some(unhandled_method) = methods.iter().find(|mm| !is_signal(mm)
-                                                            && ![METH_DIR, METH_LS].contains(&mm.name)
-                                                            && !handlers.contains_key(mm.name))
+                                                            && ![METH_DIR, METH_LS].contains(&mm.name.as_ref())
+                                                            && !handlers.contains_key(mm.name.as_ref()))
         {
             panic!("No handler found for method '{}' of a static node", unhandled_method.name);
         }
@@ -392,55 +392,55 @@ pub const SIG_CHNG: &str = "chng";
 pub const METH_PING: &str = "ping";
 
 pub(crate) const DIR_LS_METHODS: [&MetaMethod; 2] = [
-    &MetaMethod {
-        name: METH_DIR,
-        flags: Flag::None as u32,
-        access: AccessLevel::Browse,
-        param: "DirParam",
-        result: "DirResult",
-        signals: &[],
-        description: "",
-    },
-    &MetaMethod {
-        name: METH_LS,
-        flags: Flag::None as u32,
-        access: AccessLevel::Browse,
-        param: "LsParam",
-        result: "LsResult",
-        signals: &[],
-        description: "",
-    }
+    &MetaMethod::new_static(
+        METH_DIR,
+        Flag::None as u32,
+        AccessLevel::Browse,
+        "DirParam",
+        "DirResult",
+        &[],
+        "",
+    ),
+    &MetaMethod::new_static(
+        METH_LS,
+        Flag::None as u32,
+        AccessLevel::Browse,
+        "LsParam",
+        "LsResult",
+        &[],
+        "",
+    ),
 ];
 
-pub const META_METHOD_GET: MetaMethod = MetaMethod {
-        name: METH_GET,
-        flags: Flag::IsGetter as u32,
-        access: AccessLevel::Read,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    };
+pub const META_METHOD_GET: MetaMethod = MetaMethod::new_static(
+    METH_GET,
+    Flag::IsGetter as u32,
+    AccessLevel::Read,
+    "",
+    "",
+    &[],
+    "",
+);
 
-pub const META_METHOD_SET: MetaMethod = MetaMethod {
-        name: METH_SET,
-        flags: Flag::IsSetter as u32,
-        access: AccessLevel::Write,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    };
+pub const META_METHOD_SET: MetaMethod = MetaMethod::new_static(
+    METH_SET,
+    Flag::IsSetter as u32,
+    AccessLevel::Write,
+    "",
+    "",
+    &[],
+    "",
+);
 
-pub const META_METHOD_SIG_CHNG: MetaMethod = MetaMethod {
-        name: SIG_CHNG,
-        flags: Flag::IsSignal as u32,
-        access: AccessLevel::Read,
-        param: "",
-        result: "",
-        signals: &[],
-        description: "",
-    };
+pub const META_METHOD_SIG_CHNG: MetaMethod = MetaMethod::new_static(
+    SIG_CHNG,
+    Flag::IsSignal as u32,
+    AccessLevel::Read,
+    "",
+    "",
+    &[],
+    "",
+);
 
 pub const PROPERTY_METHODS: [&MetaMethod; 3] = [
     &META_METHOD_GET,
