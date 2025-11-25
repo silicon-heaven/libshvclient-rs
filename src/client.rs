@@ -570,15 +570,15 @@ pub type MetaMethods = Cow<'static, [&'static MetaMethod]>;
 
 // The wrapping struct itself is descriptive
 #[allow(clippy::type_complexity)]
-pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
+pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, ClientCommandSender<T>, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
 
 impl<T> MethodsGetter<T> {
     pub fn new<F, Fut>(func: F) -> Self
     where
-        F: Fn(String, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
+        F: Fn(String, ClientCommandSender<T>,Option<AppState<T>>) -> Fut + Sync + Send + 'static,
         Fut: Future<Output = Option<MetaMethods>> + Send + 'static,
     {
-        Self(Box::new(move |path, data| Box::pin(func(path, data))))
+        Self(Box::new(move |path, client_command_sender, data| Box::pin(func(path, client_command_sender, data))))
     }
 }
 
@@ -1952,7 +1952,7 @@ mod tests {
         // Request handling tests
         //
         pub(super) fn make_client_with_handlers() -> Client<Full,()> {
-            async fn methods_getter(path: String, _: Option<AppState<()>>) -> Option<MetaMethods> {
+            async fn methods_getter(path: String, _: ClientCommandSender<()>, _: Option<AppState<()>>) -> Option<MetaMethods> {
                 if path.is_empty() {
                     Some(MetaMethods::from(&PROPERTY_METHODS))
                 } else {

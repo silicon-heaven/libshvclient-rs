@@ -162,7 +162,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         tokio::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
     };
 
-    async fn dyn_methods_getter(_path: String, _: Option<AppState<State>>) -> Option<MetaMethods> {
+    async fn dyn_methods_getter(_path: String, _: ClientCommandSender<State>, _: Option<AppState<State>>) -> Option<MetaMethods> {
         Some(MetaMethods::from(&PROPERTY_METHODS))
     }
     async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender<State>) {
