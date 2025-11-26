@@ -42,15 +42,15 @@ mod private {
 }
 use private::next_subscription_id;
 
-pub struct Subscriber<T> {
+pub struct Subscriber {
     notifications_rx: Receiver<RpcFrame>,
     // For unsubscribe on drop
-    client_cmd_tx: Sender<ClientCommand<T>>,
+    client_cmd_tx: Sender<ClientCommand>,
     ri: ShvRI,
     subscription_id: u64,
 }
 
-impl<T> Subscriber<T> {
+impl Subscriber {
     pub fn path_signal(&self) -> (&str, &str) {
         (self.ri.path(), self.ri.signal().unwrap_or("*"))
     }
@@ -59,7 +59,7 @@ impl<T> Subscriber<T> {
     }
 }
 
-impl<T> futures::Stream for Subscriber<T> {
+impl futures::Stream for Subscriber {
     type Item = RpcFrame;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
@@ -71,7 +71,7 @@ impl<T> futures::Stream for Subscriber<T> {
     }
 }
 
-impl<T> Drop for Subscriber<T> {
+impl Drop for Subscriber {
     fn drop(&mut self) {
         if let Err(err) = self.client_cmd_tx.unbounded_send(
             ClientCommand::Unsubscribe { subscription_id: self.subscription_id, }) {
@@ -146,19 +146,19 @@ pub enum RpcCallResponse<T> {
     Delay(f64),
 }
 
-pub struct ClientCommandSender<T> {
-    pub(crate) sender: Sender<ClientCommand<T>>,
+pub struct ClientCommandSender {
+    pub(crate) sender: Sender<ClientCommand>,
 }
 
-impl<T> Clone for ClientCommandSender<T> {
+impl Clone for ClientCommandSender {
     fn clone(&self) -> Self {
         Self { sender: self.sender.clone() }
     }
 }
 
-impl<T> ClientCommandSender<T> {
+impl ClientCommandSender {
     #[cfg(feature = "mocking")]
-    pub fn from_raw(sender: Sender<ClientCommand<T>>) -> Self {
+    pub fn from_raw(sender: Sender<ClientCommand>) -> Self {
         Self { sender }
     }
 
@@ -168,25 +168,13 @@ impl<T> ClientCommandSender<T> {
             .unwrap_or_else(|e| error!("Failed to send TerminateClient command: {e}"));
     }
 
-    pub fn mount_node(&self, path: impl AsRef<str>, node: ClientNode<'static, T>) {
-        self.sender
-            .unbounded_send(ClientCommand::MountNode { path: path.as_ref().into(), node })
-            .unwrap_or_else(|e| error!("Failed to send MountNode command: {e}"));
-    }
-
-    pub fn unmount_node(&self, path: impl AsRef<str>) {
-        self.sender
-            .unbounded_send(ClientCommand::UnmountNode { path: path.as_ref().into() })
-            .unwrap_or_else(|e| error!("Failed to send UnmountNode command: {e}"));
-    }
-
     pub fn do_rpc_call(
         &self,
         shvpath: impl AsRef<str>,
         method: impl AsRef<str>,
         param: Option<RpcValue>,
         timeout: Option<Duration>,
-    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand<T>>>
+    ) -> Result<Receiver<RpcFrame>, TrySendError<ClientCommand>>
     {
         let (response_sender, response_receiver) = futures::channel::mpsc::unbounded();
         self.sender.unbounded_send(ClientCommand::RpcCall {
@@ -347,11 +335,11 @@ impl<T> ClientCommandSender<T> {
         Err(CallRpcMethodError::new(path, method, CallRpcMethodErrorKind::ConnectionClosed))
     }
 
-    pub fn send_message(&self, message: RpcMessage) -> Result<(), TrySendError<ClientCommand<T>>> {
+    pub fn send_message(&self, message: RpcMessage) -> Result<(), TrySendError<ClientCommand>> {
         self.sender.unbounded_send(ClientCommand::SendMessage { message })
     }
 
-    pub async fn subscribe(&self, ri: ShvRI) -> Result<Subscriber<T>, CallRpcMethodError> {
+    pub async fn subscribe(&self, ri: ShvRI) -> Result<Subscriber, CallRpcMethodError> {
         let subscription_id = next_subscription_id();
         let (notifications_tx, notifications_rx) = futures::channel::mpsc::unbounded();
 
@@ -396,7 +384,7 @@ impl<T> ClientCommandSender<T> {
 }
 
 
-pub enum ClientCommand<T> {
+pub enum ClientCommand {
     SendMessage {
         message: RpcMessage,
     },
@@ -412,13 +400,6 @@ pub enum ClientCommand<T> {
     },
     Unsubscribe {
         subscription_id: u64,
-    },
-    MountNode  {
-        path: String,
-        node: ClientNode<'static, T>,
-    },
-    UnmountNode {
-        path: String,
     },
     TerminateClient,
 }
@@ -446,7 +427,7 @@ impl<'a> RpcCall<'a> {
         self
     }
 
-    pub async fn exec<T, R, E>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<R, CallRpcMethodError>
+    pub async fn exec<R, E>(self, client_cmd_sender: &ClientCommandSender) -> Result<R, CallRpcMethodError>
     where
         R: for<'r> TryFrom<&'r RpcValue, Error = E>,
         E: std::fmt::Display,
@@ -454,7 +435,7 @@ impl<'a> RpcCall<'a> {
         client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, None::<fn(_)>).await
     }
 
-    pub async fn exec_with_progress<T, R, E>(self, client_cmd_sender: &ClientCommandSender<T>, progress_notifier: impl Fn(f64) + Send + 'static) -> Result<R, CallRpcMethodError>
+    pub async fn exec_with_progress<R, E>(self, client_cmd_sender: &ClientCommandSender, progress_notifier: impl Fn(f64) + Send + 'static) -> Result<R, CallRpcMethodError>
     where
         R: for<'r> TryFrom<&'r RpcValue, Error = E>,
         E: std::fmt::Display,
@@ -462,7 +443,7 @@ impl<'a> RpcCall<'a> {
         client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, Some(progress_notifier)).await
     }
 
-    pub fn stream<T, R, E>(self, client_cmd_sender: &ClientCommandSender<T>) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
+    pub fn stream<T, R, E>(self, client_cmd_sender: &ClientCommandSender) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
     where
         R: for<'r> TryFrom<&'r RpcValue, Error = E>,
         E: std::fmt::Display,
@@ -488,7 +469,7 @@ impl<'a> RpcCallLsList<'a> {
         self
     }
 
-    pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<Vec<String>, CallRpcMethodError> {
+    pub async fn exec(self, client_cmd_sender: &ClientCommandSender) -> Result<Vec<String>, CallRpcMethodError> {
         client_cmd_sender.call_ls_list(self.path, self.timeout).await
     }
 }
@@ -510,7 +491,7 @@ impl<'a> RpcCallLsExists<'a> {
         self
     }
 
-    pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<bool, CallRpcMethodError> {
+    pub async fn exec(self, client_cmd_sender: &ClientCommandSender) -> Result<bool, CallRpcMethodError> {
         client_cmd_sender.call_ls_exists(self.path, self.dirname, self.timeout).await
     }
 }
@@ -531,11 +512,11 @@ impl<'a> RpcCallDirList<'a> {
         self
     }
 
-    pub async fn exec_brief<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+    pub async fn exec_brief(self, client_cmd_sender: &ClientCommandSender) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
         client_cmd_sender.call_dir_brief(self.path, self.timeout).await
     }
 
-    pub async fn exec_full<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+    pub async fn exec_full(self, client_cmd_sender: &ClientCommandSender) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
         client_cmd_sender.call_dir_full(self.path, self.timeout).await
     }
 }
@@ -557,7 +538,7 @@ impl<'a> RpcCallDirExists<'a> {
         self
     }
 
-    pub async fn exec<T>(self, client_cmd_sender: &ClientCommandSender<T>) -> Result<bool, CallRpcMethodError> {
+    pub async fn exec(self, client_cmd_sender: &ClientCommandSender) -> Result<bool, CallRpcMethodError> {
         client_cmd_sender.call_dir_exists(self.path, self.method, self.timeout).await
     }
 }
@@ -570,12 +551,12 @@ pub type MetaMethods = Cow<'static, [&'static MetaMethod]>;
 
 // The wrapping struct itself is descriptive
 #[allow(clippy::type_complexity)]
-pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, ClientCommandSender<T>, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
+pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, ClientCommandSender, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
 
 impl<T> MethodsGetter<T> {
     pub fn new<F, Fut>(func: F) -> Self
     where
-        F: Fn(String, ClientCommandSender<T>,Option<AppState<T>>) -> Fut + Sync + Send + 'static,
+        F: Fn(String, ClientCommandSender,Option<AppState<T>>) -> Fut + Sync + Send + 'static,
         Fut: Future<Output = Option<MetaMethods>> + Send + 'static,
     {
         Self(Box::new(move |path, client_command_sender, data| Box::pin(func(path, client_command_sender, data))))
@@ -584,12 +565,12 @@ impl<T> MethodsGetter<T> {
 
 // The wrapping struct itself is descriptive
 #[allow(clippy::type_complexity)]
-pub struct RequestHandler<T>(pub(crate) Box<dyn Fn(RpcMessage, ClientCommandSender<T>, Option<AppState<T>>) -> BoxFuture<'static, ()> + Sync + Send>);
+pub struct RequestHandler<T>(pub(crate) Box<dyn Fn(RpcMessage, ClientCommandSender, Option<AppState<T>>) -> BoxFuture<'static, ()> + Sync + Send>);
 
 impl<T> RequestHandler<T> {
     pub fn stateful<F, Fut>(func: F) -> Self
     where
-        F: Fn(RpcMessage, ClientCommandSender<T>, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
+        F: Fn(RpcMessage, ClientCommandSender, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
         Fut: Future<Output=()> + Send + 'static
     {
         Self(Box::new(move |req, tx, data| Box::pin(func(req, tx, data))))
@@ -597,7 +578,7 @@ impl<T> RequestHandler<T> {
 
     pub fn stateless<F, Fut>(func: F) -> Self
     where
-        F: Fn(RpcMessage, ClientCommandSender<T>) -> Fut + Sync + Send + 'static,
+        F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
         Fut: Future<Output=()> + Send + 'static
     {
         Self(Box::new(move |req, tx, _data| Box::pin(func(req, tx))))
@@ -897,7 +878,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
         let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
         spawn_connection_task(config, conn_evt_tx);
@@ -906,7 +887,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
 
     pub async fn run_with_init<H>(mut self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
         self.run_with_init_opt(config, Some(handler)).await
     }
@@ -917,7 +898,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender<T>, ClientEventsReceiver),
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
         let mut rpc_call_timers = FuturesUnordered::new();
         let mut pending_rpc_calls: HashMap<i64, (Sender<RpcFrame>, UnboundedSender<()>)> = HashMap::new();
@@ -935,7 +916,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
             init_handler(client_cmd_tx.clone(), client_events_receiver);
         }
 
-        async fn check_shv_api_version<T>(client_cmd_tx: ClientCommandSender<T>) -> Result<ShvApiVersion, CallRpcMethodError>
+        async fn check_shv_api_version(client_cmd_tx: ClientCommandSender) -> Result<ShvApiVersion, CallRpcMethodError>
         {
             let api_version = RpcCallLsList::new(".broker")
                 .exec(&client_cmd_tx)
@@ -1078,17 +1059,6 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                         .unwrap_or_else(|e| error!("Cannot send Unsubscribe command through ClientCommand channel: {e}"));
                                 }
                             }
-                            MountNode { path, node } => {
-                                if self.mounts.contains_key(&path) {
-                                    warn!("Another node already mounted on path `{path}`");
-                                }
-                                self.mounts.insert(path.clone(), node);
-                            }
-                            UnmountNode { path } => {
-                                if self.mounts.remove(&path).is_none() {
-                                    warn!("No node to unmount on path `{path}`");
-                                }
-                            }
                             TerminateClient => {
                                 info!("TerminateClient command received, exiting client loop");
                                 return Ok(());
@@ -1205,7 +1175,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
     async fn process_rpc_frame(
         &self,
         frame: RpcFrame,
-        client_cmd_tx: &ClientCommandSender<T>,
+        client_cmd_tx: &ClientCommandSender,
         pending_rpc_calls: &mut HashMap<i64, (Sender<RpcFrame>, UnboundedSender<()>)>,
         subscriptions: &mut Subscriptions,
         subscription_requests: &mut HashMap<RqId, u64>,
@@ -1404,9 +1374,9 @@ mod tests {
 
         const SHV_API_VERSION_DEFAULT: ShvApiVersion = ShvApiVersion::V3;
 
-        pub(super) async fn receive_connected_and_disconnected_events<T>(
+        pub(super) async fn receive_connected_and_disconnected_events(
             conn_evt_tx: Sender<ConnectionEvent>,
-            _cli_cmd_tx: ClientCommandSender<T>,
+            _cli_cmd_tx: ClientCommandSender,
             mut client_events_rx: ClientEventsReceiver,
         ) {
             {
@@ -1417,9 +1387,9 @@ mod tests {
             let _conn_mock = init_connection(&conn_evt_tx, &mut client_events_rx, SHV_API_VERSION_DEFAULT).await;
         }
 
-        pub(super) async fn send_message<T>(
+        pub(super) async fn send_message(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1438,9 +1408,9 @@ mod tests {
             assert_eq!(msg.param(), Some(&42.into()));
         }
 
-        pub(super) async fn send_message_fails<T>(
+        pub(super) async fn send_message_fails(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1463,13 +1433,13 @@ mod tests {
             rx.next().await.unwrap().to_rpcmesage().unwrap()
         }
 
-        async fn receive_notification<T>(rx: &mut Subscriber<T>) -> RpcMessage {
+        async fn receive_notification(rx: &mut Subscriber) -> RpcMessage {
             rx.next().await.unwrap().to_rpcmesage().unwrap()
         }
 
-        pub(super) async fn call_method_and_receive_response<T>(
+        pub(super) async fn call_method_and_receive_response(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1485,9 +1455,9 @@ mod tests {
             assert_eq!(resp.response().unwrap().success().unwrap(), &RpcValue::from(42));
         }
 
-        pub(super) async fn call_method_and_receive_error_timeout_response<T>(
+        pub(super) async fn call_method_and_receive_error_timeout_response(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1503,9 +1473,9 @@ mod tests {
             assert_eq!(resp.error().unwrap().code, RpcErrorCode::MethodCallTimeout.into());
         }
 
-        pub(super) async fn call_method_and_receive_delay<T>(
+        pub(super) async fn call_method_and_receive_delay(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -1546,9 +1516,9 @@ mod tests {
             assert_eq!(resp.response().unwrap().success(), Some(&42.into()));
         }
 
-        pub(super) async fn call_method_timeouts_when_disconnected<T>(
+        pub(super) async fn call_method_timeouts_when_disconnected(
             _conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut _cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut resp_rx = cli_cmd_tx
@@ -1557,8 +1527,8 @@ mod tests {
             receive_rpc_msg(&mut resp_rx).timeout(Duration::from_millis(1000)).await.expect_err("Unexpected method call response");
         }
 
-        async fn check_notification_received<T>(
-            notify_rx: &mut Subscriber<T>,
+        async fn check_notification_received(
+            notify_rx: &mut Subscriber,
             path: Option<&str>,
             method: Option<&str>,
             param: Option<&RpcValue>,
@@ -1573,9 +1543,9 @@ mod tests {
         }
 
         // Notifications in SHV API v2
-        pub(super) async fn receive_subscribed_notification_v2<T>(
+        pub(super) async fn receive_subscribed_notification_v2(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V2).await;
@@ -1648,9 +1618,9 @@ mod tests {
             check_notification_received(&mut notify_rx_prefix, Some("path/to/resource"), Some(SIG_CHNG), Some(&"baz".into())).await;
         }
 
-        pub(super) async fn do_not_receive_unsubscribed_notification_v2<T>(
+        pub(super) async fn do_not_receive_unsubscribed_notification_v2(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V2).await;
@@ -1687,9 +1657,9 @@ mod tests {
                 .expect_err("Unexpected notification received");
         }
 
-        pub(super) async fn subscribe_and_unsubscribe_v2<T>(
+        pub(super) async fn subscribe_and_unsubscribe_v2(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V2).await;
@@ -1743,9 +1713,9 @@ mod tests {
         }
 
         // Notifications in SHV API v3
-        pub(super) async fn receive_subscribed_notification_v3<T>(
+        pub(super) async fn receive_subscribed_notification_v3(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1800,9 +1770,9 @@ mod tests {
             check_notification_received(&mut notify_rx_prefix, Some("path/to/resource"), Some(SIG_CHNG), Some(&"baz".into())).await;
         }
 
-        pub(super) async fn do_not_receive_unsubscribed_notification_v3<T>(
+        pub(super) async fn do_not_receive_unsubscribed_notification_v3(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1839,9 +1809,9 @@ mod tests {
                 .expect_err("Unexpected notification received");
         }
 
-        pub(super) async fn subscribe_and_unsubscribe_v3<T>(
+        pub(super) async fn subscribe_and_unsubscribe_v3(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1895,9 +1865,9 @@ mod tests {
 
         // Tests that notifications are forwarded to subscribers only for confirmed
         // subscriptions — those that have received a response to their subscription request.
-        pub(super) async fn send_notifications_only_for_confirmed_subscriptions<T>(
+        pub(super) async fn send_notifications_only_for_confirmed_subscriptions(
             conn_evt_tx: Sender<ConnectionEvent>,
-            cli_cmd_tx: ClientCommandSender<T>,
+            cli_cmd_tx: ClientCommandSender,
             mut cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, ShvApiVersion::V3).await;
@@ -1952,7 +1922,7 @@ mod tests {
         // Request handling tests
         //
         pub(super) fn make_client_with_handlers() -> Client<Full,()> {
-            async fn methods_getter(path: String, _: ClientCommandSender<()>, _: Option<AppState<()>>) -> Option<MetaMethods> {
+            async fn methods_getter(path: String, _: ClientCommandSender, _: Option<AppState<()>>) -> Option<MetaMethods> {
                 if path.is_empty() {
                     Some(MetaMethods::from(&PROPERTY_METHODS))
                 } else {
@@ -1960,7 +1930,7 @@ mod tests {
                 }
             }
 
-            async fn request_handler<T>(rq: RpcMessage, client_cmd_tx: ClientCommandSender<T>) {
+            async fn request_handler(rq: RpcMessage, client_cmd_tx: ClientCommandSender) {
                 let mut resp = rq.prepare_response().unwrap();
                 match rq.method() {
                     Some(crate::clientnode::METH_LS) => {
@@ -2000,8 +1970,8 @@ mod tests {
             conn_mock.expect_send_message().await
         }
 
-        pub(super) async fn handle_method_calls<T>(conn_evt_tx: Sender<ConnectionEvent>,
-                                         _cli_cmd_tx: ClientCommandSender<T>,
+        pub(super) async fn handle_method_calls(conn_evt_tx: Sender<ConnectionEvent>,
+                                         _cli_cmd_tx: ClientCommandSender,
                                          mut cli_evt_rx: ClientEventsReceiver)
         {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
@@ -2107,7 +2077,7 @@ mod tests {
     }
 
     generics_def!(TestDriverBounds <C, F, S> where
-                  C: FnOnce(Sender<ConnectionEvent>, ClientCommandSender<S>, ClientEventsReceiver) -> F,
+                  C: FnOnce(Sender<ConnectionEvent>, ClientCommandSender, ClientEventsReceiver) -> F,
                   F: Future + Send + 'static,
                   F::Output: Send + 'static,
                   S: Send + Sync + 'static,

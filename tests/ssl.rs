@@ -34,7 +34,7 @@ async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     panic!("Could not start the broker");
 }
 
-async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSender<()>, ClientEventsReceiver)> {
+async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSender, ClientEventsReceiver)> {
     let (tx, rx) = futures::channel::oneshot::channel();
     let ca_crt_path = ca_crt_path.into();
     shvclient::runtime::spawn_task(async move {
