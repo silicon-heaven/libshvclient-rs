@@ -64,7 +64,7 @@ macro_rules! fixed_node {
                 ),)+
             ];
 
-            async fn $fn_name($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: Option<$crate::AppState<$T>>)?) {
+            async fn $fn_name($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender $(, $app_state: Option<$crate::AppState<$T>>)?) {
 
                 use $crate::shvrpc::RpcMessageMetaTags;
 
@@ -81,7 +81,7 @@ macro_rules! fixed_node {
                         };
                     )?
 
-                    async fn handler($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender<$T> $(, $app_state: $crate::AppState<$T>)?)
+                    async fn handler($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender $(, $app_state: $crate::AppState<$T>)?)
                     -> Option<std::result::Result<$crate::clientnode::RpcValue, $crate::clientnode::RpcError>> {
                         match $request.method() {
 

@@ -82,7 +82,7 @@ fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
 type State = RwLock<i32>;
 
 async fn emit_chng_task(
-    client_cmd_tx: ClientCommandSender<State>,
+    client_cmd_tx: ClientCommandSender,
     client_evt_rx: ClientEventsReceiver,
     app_state: AppState<State>,
 ) -> shvrpc::Result<()> {
@@ -99,15 +99,6 @@ async fn emit_chng_task(
                 Some(ClientEvent::Connected(_)) => {
                     emit_signal = true;
                     info!("Device connected");
-
-                    client_cmd_tx.mount_node("onfly", shvclient::fixed_node! {
-                        device_handler<State>(request, _tx ) {
-                            "echo" [IsGetter, Browse, "", ""] (param: RpcValue) => {
-                                println!("echo: {param}");
-                                Some(Ok(param))
-                            }
-                        }
-                    });
                 },
                 Some(ClientEvent::Disconnected) => {
                     emit_signal = false;
@@ -126,9 +117,6 @@ async fn emit_chng_task(
         }
         let state = app_state.read().await;
         info!("state: {state}");
-        if cnt == 10 {
-            client_cmd_tx.unmount_node("onfly");
-        }
         if cnt == 20 {
             client_cmd_tx.terminate_client();
         }
@@ -162,10 +150,10 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         tokio::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
     };
 
-    async fn dyn_methods_getter(_path: String, _: ClientCommandSender<State>, _: Option<AppState<State>>) -> Option<MetaMethods> {
+    async fn dyn_methods_getter(_path: String, _: ClientCommandSender, _: Option<AppState<State>>) -> Option<MetaMethods> {
         Some(MetaMethods::from(&PROPERTY_METHODS))
     }
-    async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender<State>) {
+    async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender) {
     }
 
     let stateless_node = shvclient::fixed_node!{

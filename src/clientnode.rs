@@ -231,7 +231,7 @@ impl<'a, T: Send + Sync + 'static> ClientNode<'a, T> {
         Self(NodeVariant::Constant(Box::new(node)))
     }
 
-    pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender<T>, app_state: &Option<AppState<T>>) {
+    pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender, app_state: &Option<AppState<T>>) {
         match &self.0 {
             NodeVariant::Fixed(node) => {
                 let methods = if request.shv_path().unwrap_or_default().is_empty() {
@@ -314,7 +314,7 @@ impl<'a, T: Send + Sync + 'static> ClientNode<'a, T> {
     }
 }
 
-fn resolve_request_access<T>(request: &RpcMessage, mount_path: &String, client_cmd_tx: &ClientCommandSender<T>, methods: &[&MetaMethod]) -> bool {
+fn resolve_request_access(request: &RpcMessage, mount_path: &String, client_cmd_tx: &ClientCommandSender, methods: &[&MetaMethod]) -> bool {
 
     let shv_path = request.shv_path().unwrap_or_default();
     let check_request_access = || {
@@ -359,7 +359,7 @@ fn resolve_request_access<T>(request: &RpcMessage, mount_path: &String, client_c
     false
 }
 
-pub fn send_response<T>(request: RpcMessage, client_cmd_tx: ClientCommandSender<T>, result: Result<RpcValue, RpcError>) {
+pub fn send_response(request: RpcMessage, client_cmd_tx: ClientCommandSender, result: Result<RpcValue, RpcError>) {
     match request.prepare_response() {
         Err(err) => {
             error!("Cannot prepare response. Error: {err}, request: {request}");
@@ -453,7 +453,7 @@ pub const PROPERTY_METHODS: [&MetaMethod; 3] = [
 mod tests {
     use super::*;
 
-    async fn dummy_handler(_: RpcMessage, _: ClientCommandSender<()>, _: Option<AppState<()>>) {}
+    async fn dummy_handler(_: RpcMessage, _: ClientCommandSender, _: Option<AppState<()>>) {}
 
     #[test]
     fn accept_valid_routes() {

@@ -96,7 +96,7 @@ type State = RwLock<i32>;
 
 async fn delay_node_process_request(
     request: RpcMessage,
-    client_cmd_tx: ClientCommandSender<State>,
+    client_cmd_tx: ClientCommandSender,
     state: Option<AppState<State>>,
 ) {
     if request.shv_path().unwrap_or_default().is_empty() {
@@ -123,7 +123,7 @@ async fn delay_node_process_request(
 
 
 async fn emit_chng_task(
-    client_cmd_tx: ClientCommandSender<State>,
+    client_cmd_tx: ClientCommandSender,
     mut client_evt_rx: ClientEventsReceiver,
     app_state: AppState<State>,
 ) -> shvrpc::Result<()> {
