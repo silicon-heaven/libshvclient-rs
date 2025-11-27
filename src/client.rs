@@ -1,15 +1,13 @@
 use crate::connection::{spawn_connection_task, ConnectionCommand, ConnectionEvent, ConnectionFailedKind};
-use crate::clientnode::{process_local_dir_ls, ClientNode, RequestResult, Route, METH_DIR, METH_LS, METH_PING};
+use crate::clientnode::{process_local_dir_ls, ClientNode, RequestHandler, StaticNode, METH_DIR, METH_LS, METH_PING};
 use async_broadcast::RecvError;
-use futures::future::BoxFuture;
 use futures::stream::{self, FuturesUnordered};
-use futures::{select, Future, FutureExt, Stream, StreamExt};
+use futures::{select, FutureExt, Stream, StreamExt};
 use futures::channel::mpsc::{TrySendError, UnboundedSender};
 use futures_time::task::sleep;
 use futures_time::time::Duration;
 use log::*;
 use shvrpc::client::ClientConfig;
-use shvrpc::metamethod::MetaMethod;
 use shvrpc::rpc::{Glob, ShvRI, SubscriptionParam};
 use shvrpc::rpcdiscovery::{DirParam, DirResult, LsParam, LsResult, MethodInfo};
 use shvrpc::rpcframe::RpcFrame;
@@ -17,7 +15,6 @@ use shvrpc::rpcmessage::{RpcError, RpcErrorCode, RqId};
 use shvrpc::util::find_longest_path_prefix;
 use shvrpc::{RpcMessage, RpcMessageMetaTags};
 use shvproto::RpcValue;
-use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -547,43 +544,6 @@ pub const BROKER_APP_NODE: &str = ".broker/app";
 pub const BROKER_CLIENT_NODE: &str = ".broker/client";
 pub const BROKER_CURRENT_CLIENT_NODE: &str = ".broker/currentClient";
 
-pub type MetaMethods = Cow<'static, [&'static MetaMethod]>;
-
-// The wrapping struct itself is descriptive
-#[allow(clippy::type_complexity)]
-pub struct MethodsGetter<T>(pub(crate) Box<dyn Fn(String, ClientCommandSender, Option<AppState<T>>) -> BoxFuture<'static, Option<MetaMethods>> + Sync + Send>);
-
-impl<T> MethodsGetter<T> {
-    pub fn new<F, Fut>(func: F) -> Self
-    where
-        F: Fn(String, ClientCommandSender,Option<AppState<T>>) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = Option<MetaMethods>> + Send + 'static,
-    {
-        Self(Box::new(move |path, client_command_sender, data| Box::pin(func(path, client_command_sender, data))))
-    }
-}
-
-// The wrapping struct itself is descriptive
-#[allow(clippy::type_complexity)]
-pub struct RequestHandler<T>(pub(crate) Box<dyn Fn(RpcMessage, ClientCommandSender, Option<AppState<T>>) -> BoxFuture<'static, ()> + Sync + Send>);
-
-impl<T> RequestHandler<T> {
-    pub fn stateful<F, Fut>(func: F) -> Self
-    where
-        F: Fn(RpcMessage, ClientCommandSender, Option<AppState<T>>) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output=()> + Send + 'static
-    {
-        Self(Box::new(move |req, tx, data| Box::pin(func(req, tx, data))))
-    }
-
-    pub fn stateless<F, Fut>(func: F) -> Self
-    where
-        F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output=()> + Send + 'static
-    {
-        Self(Box::new(move |req, tx, _data| Box::pin(func(req, tx))))
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum ShvApiVersion {
@@ -785,75 +745,59 @@ pub enum Full { }
 impl ClientVariant for Full { }
 impl private::Sealed for Full { }
 
-pub struct Client<V: ClientVariant, T> {
-    mounts: BTreeMap<String, ClientNode<'static, T>>,
-    app_state: Option<AppState<T>>,
+pub struct Client<V: ClientVariant> {
+    mounts: BTreeMap<String, ClientNode>,
     rpc_call_timeout: Duration,
     variant_marker: PhantomData<V>,
 }
 
 const RPC_CALL_DEFAULT_TIMEOUT_SECS: u64 = 10;
 
-impl Client<Plain, ()> {
+impl Client<Plain> {
     pub fn new_plain() -> Self {
         Self {
             mounts: Default::default(),
-            app_state: Default::default(),
             rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
     }
 }
 
-impl<T: Send + Sync + 'static> Default for Client<Full, T> {
+impl Default for Client<Full> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Send + Sync + 'static> Client<Full, T> {
+impl Client<Full> {
     pub fn new() -> Self {
         Self {
             mounts: Default::default(),
-            app_state: Default::default(),
             rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
     }
 
     pub fn app(self, app_node: crate::appnodes::DotAppNode) -> Self {
-        self.mount(".app", ClientNode::constant(app_node))
+        self.mount(".app", ClientNode::new_static(app_node))
     }
 
     pub fn device(self, device_node: crate::appnodes::DotDeviceNode) -> Self {
-        self.mount(".device", ClientNode::constant(device_node))
+        self.mount(".device", ClientNode::new_static(device_node))
     }
 
-    pub fn mount<P: Into<String>>(mut self, path: P, node: ClientNode<'static, T>) -> Self {
+    pub fn mount(mut self, path: impl Into<String>, node: ClientNode) -> Self {
         self.mounts.insert(path.into(), node);
         self
     }
 
-    pub fn mount_fixed<P, M, R>(mut self, path: P, defined_methods: M, routes: R) -> Self
-    where
-        P: Into<String>,
-        M: IntoIterator<Item = &'static MetaMethod>,
-        R: IntoIterator<Item = Route<T>>,
-    {
-        self.mounts.insert(path.into(), ClientNode::fixed(defined_methods, routes));
+    pub fn mount_static(mut self, path: impl Into<String>, node: impl StaticNode) -> Self {
+        self.mounts.insert(path.into(), ClientNode::new_static(node));
         self
     }
 
-    pub fn mount_dynamic<P>(mut self, path: P, methods_getter: MethodsGetter<T>, request_handler: RequestHandler<T>) -> Self
-    where
-        P: Into<String>,
-    {
-        self.mounts.insert(path.into(), ClientNode::dynamic(methods_getter, request_handler));
-        self
-    }
-
-    pub fn with_app_state(mut self, app_state: AppState<T>) -> Self {
-        self.app_state = Some(app_state);
+    pub fn mount_dynamic(mut self, path: impl Into<String>, request_handler: RequestHandler) -> Self {
+        self.mounts.insert(path.into(), ClientNode::new_dynamic(request_handler));
         self
     }
 
@@ -866,7 +810,7 @@ impl<T: Send + Sync + 'static> Client<Full, T> {
     }
 }
 
-impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
+impl<V: ClientVariant> Client<V> {
     pub fn rpc_call_timeout(mut self, timeout: Duration) -> Self {
         self.rpc_call_timeout = timeout;
         self
@@ -1201,7 +1145,7 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                             if let Some((mount, path)) = find_longest_path_prefix(&self.mounts, shv_path) {
                                 request_msg.set_shvpath(path);
                                 let node = self.mounts.get(mount).unwrap_or_else(|| panic!("A node on path '{mount}' should exist"));
-                                node.process_request(request_msg, mount.to_owned(), client_cmd_tx.clone(), &self.app_state).await;
+                                node.process_request(request_msg, mount.to_owned(), client_cmd_tx.clone()).await;
                             } else {
                                 let method = frame.method().unwrap_or_default();
                                 resp.set_error(RpcError::new(
@@ -1211,17 +1155,12 @@ impl<V: ClientVariant, T: Send + Sync + 'static> Client<V, T> {
                                 client_cmd_tx.send_message(resp)?;
                             }
                         }
-                        Some(result) => {
-                            match result {
-                                RequestResult::Response(r) => {
-                                    resp.set_result(r);
-                                    client_cmd_tx.send_message(resp)?;
-                                }
-                                RequestResult::Error(e) => {
-                                    resp.set_error(e);
-                                    client_cmd_tx.send_message(resp)?;
-                                }
-                            }
+                        Some(res) => {
+                            match res {
+                                Ok(val) => resp.set_result(val),
+                                Err(err) => resp.set_error(err),
+                            };
+                            client_cmd_tx.send_message(resp)?;
                         }
                     };
                 } else {
@@ -1281,12 +1220,16 @@ mod tests {
     use generics_alias::*;
 
     mod drivers {
+        use crate::clientnode::{LsHandler, MethodHandlerType, RequestResult, METH_GET, METH_SET};
+        use std::borrow::Cow;
+
         use super::*;
         use crate::appnodes::DotAppNode;
+        use async_trait::async_trait;
         use futures_time::future::FutureExt;
         use futures_time::time::Duration;
-        use crate::clientnode::{SIG_CHNG, PROPERTY_METHODS};
-        use shvrpc::metamethod::AccessLevel;
+        use crate::clientnode::{MethodHandler, RequestHandlerResult, ResolvedRequest, PROPERTY_METHODS, SIG_CHNG};
+        use shvrpc::metamethod::{AccessLevel, MetaMethod};
 
         struct ConnectionMock {
             conn_evt_tx: Sender<ConnectionEvent>,
@@ -1921,48 +1864,84 @@ mod tests {
 
         // Request handling tests
         //
-        pub(super) fn make_client_with_handlers() -> Client<Full,()> {
-            async fn methods_getter(path: String, _: ClientCommandSender, _: Option<AppState<()>>) -> Option<MetaMethods> {
-                if path.is_empty() {
-                    Some(MetaMethods::from(&PROPERTY_METHODS))
-                } else {
-                    None
+        pub(super) fn make_client_with_handlers() -> Client<Full> {
+            async fn request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender) -> RequestHandlerResult {
+                let make_err = || Err(RpcError::new(
+                        RpcErrorCode::MethodNotFound,
+                        format!("Unknown method '{:?}'", rq.method()))
+                );
+                if !rq.shv_path().is_none_or(str::is_empty) {
+                    return make_err();
+                }
+                match rq.method() {
+                    Some(crate::clientnode::METH_DIR) => {
+                        Ok(ResolvedRequest {
+                            methods: PROPERTY_METHODS.iter().map(|mm| MetaMethod { access: AccessLevel::Command, ..mm.clone() }).collect(),
+                            handler: MethodHandlerType::Dir,
+                        })
+                    }
+                    Some(crate::clientnode::METH_LS) => {
+                        Ok(ResolvedRequest {
+                            methods: Cow::from(PROPERTY_METHODS),
+                            handler: MethodHandlerType::Ls(LsHandler::new(async |_,_| {
+                                Some(Ok(vec!["ls".into()]))
+                            })),
+                        })
+                    },
+                    Some(crate::clientnode::METH_GET) => {
+                        Ok(ResolvedRequest {
+                            methods: Cow::from(PROPERTY_METHODS),
+                            handler: MethodHandlerType::Method {
+                                name: METH_GET.into(),
+                                handler: MethodHandler::new(async |_,_| {
+                                    Some(Ok("get"))
+                                }),
+                            },
+                        })
+                    },
+                    Some(crate::clientnode::METH_SET) => {
+                        Ok(ResolvedRequest {
+                            methods: Cow::from(PROPERTY_METHODS),
+                            handler: MethodHandlerType::Method {
+                                name: METH_SET.into(),
+                                handler: MethodHandler::new(async |_,_| {
+                                    // Some(Ok("set".into()))
+                                    Some(Ok("set"))
+                                }),
+                            },
+                        })
+                    },
+                    _ => make_err(),
                 }
             }
 
-            async fn request_handler(rq: RpcMessage, client_cmd_tx: ClientCommandSender) {
-                let mut resp = rq.prepare_response().unwrap();
-                match rq.method() {
-                    Some(crate::clientnode::METH_LS) => {
-                        resp.set_result("ls");
-                    },
-                    Some(crate::clientnode::METH_GET) => {
-                        resp.set_result("get");
-                    },
-                    Some(crate::clientnode::METH_SET) => {
-                        resp.set_result("set");
-                    },
-                    _ => {
-                        resp.set_error(RpcError::new(
-                                RpcErrorCode::MethodNotFound,
-                                format!("Unknown method '{:?}'", rq.method())));
-                    }
+            struct PropertyNode;
+
+            #[async_trait]
+            impl StaticNode for PropertyNode {
+                fn methods(&self) -> &'static [MetaMethod] {
+                    PROPERTY_METHODS
                 }
-                client_cmd_tx.send_message(resp).unwrap();
+
+                async fn process_request(&self, request: RpcMessage, client_cmd_tx: ClientCommandSender) -> Option<RequestResult> {
+                    let ResolvedRequest { handler, .. } = match request_handler(request.clone(), client_cmd_tx.clone()).await {
+                        Ok(handler) => handler,
+                        Err(err) => return Some(Err(err)),
+                    };
+                    let MethodHandlerType::Method { handler: MethodHandler(handler), .. } = handler else {
+                        unreachable!("dir and ls should be handled by the lib");
+                    };
+                    handler(request, client_cmd_tx).await
+                }
             }
 
             Client::new()
                 .app(DotAppNode::new("test"))
-                .mount_dynamic("dynamic/sync",
-                    MethodsGetter::new(methods_getter),
-                    RequestHandler::stateless(request_handler))
-                .mount_dynamic("dynamic/async",
-                    MethodsGetter::new(methods_getter),
-                    RequestHandler::stateless(request_handler))
-                .mount_fixed("static",
-                    PROPERTY_METHODS,
-                    [Route::new([crate::clientnode::METH_GET, crate::clientnode::METH_SET],
-                        RequestHandler::stateless(request_handler))])
+                .mount_dynamic("dynamic/sync", RequestHandler::new(request_handler))
+                .mount_dynamic("dynamic/async", RequestHandler::new(request_handler))
+                .mount_static("static", PropertyNode)
+                .rpc_call_timeout(Duration::from_secs(10))
+
         }
 
         async fn recv_request_get_response(conn_mock: &mut ConnectionMock, request: RpcMessage) -> RpcMessage {
@@ -2035,17 +2014,17 @@ mod tests {
                 let mut request = RpcMessage::new_request("static", "set", None);
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("dynamic/sync", "set", None);
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("dynamic/async", "get", None);
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
             }
         }
     }
@@ -2061,7 +2040,7 @@ mod tests {
             mk_test_fn!($name ($(#[$attr])*) Some($client));
         };
         ($name:ident $(#[$attr:meta])*) => {
-            mk_test_fn!($name ($(#[$attr])*) None::<$crate::Client<Full,()>>);
+            mk_test_fn!($name ($(#[$attr])*) None::<$crate::Client<Full>>);
         };
     }
 
@@ -2076,11 +2055,10 @@ mod tests {
         };
     }
 
-    generics_def!(TestDriverBounds <C, F, S> where
+    generics_def!(TestDriverBounds <C, F> where
                   C: FnOnce(Sender<ConnectionEvent>, ClientCommandSender, ClientEventsReceiver) -> F,
                   F: Future + Send + 'static,
                   F::Output: Send + 'static,
-                  S: Send + Sync + 'static,
                   );
 
 
@@ -2092,7 +2070,7 @@ mod tests {
             $(def_test!($name $(#[$attr])* $(,$client)?);)+
 
             #[generics(TestDriverBounds)]
-            async fn init_client(test_drv: C, custom_client: Option<Client<Full,S>>) {
+            async fn init_client(test_drv: C, custom_client: Option<Client<Full>>) {
                 let mut client = custom_client.unwrap_or_else(|| Client::new().app(DotAppNode::new("test")));
                 let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
                 let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
@@ -2109,7 +2087,7 @@ mod tests {
             }
 
             #[generics(TestDriverBounds)]
-            pub fn run_test(test_drv: C, custom_client: Option<Client<Full,S>>) {
+            pub fn run_test(test_drv: C, custom_client: Option<Client<Full>>) {
                 let _ = simple_logger::init_with_level(Level::Debug);
 
                 #[cfg(feature = "tokio")]

@@ -1,16 +1,14 @@
 
-/// Generator for fixed nodes
+/// Generator for static nodes
 ///
-/// A convenient macro for generating fixed nodes with methods table,
-/// handlers, automatic parameters checking and response generation
-/// at one place.
+/// A convenient macro for generating static nodes with methods table, handlers,
+/// automatic parameters checking and response generation at one place.
 ///
 /// Usage:
 ///
 ///#```
-///#  let node = fixed_node!{
-///#         // `app_state` parameter is optional and has to be specified with the type parameter.
-///#         device_handler(request, client_cmd_tx, app_state: i32) {
+///#  let node = static_node!{
+///#         NodeTypeName(request, client_cmd_tx) {
 ///#             // If a parameter in ( ) is present, the code will handle the type
 ///#             // conversion and send an appropriate Error response on a failure.
 ///#             // The type has to implements trait `TryFrom<&RpcValue, Error=String>`.
@@ -46,88 +44,151 @@
 ///# }
 ///# ```
 #[macro_export]
-macro_rules! fixed_node {
-    ($fn_name:ident < $T:ty > ( $request:ident, $client_cmd_tx:ident $(, $app_state:ident)?) {
-        $($method:tt [$($flags:ident)|+, $access:ident, $methodparam:expr, $methodresult:expr] $({ $(($signame:expr, $sigval:expr)),* })? $(($param:ident : $type:ty ))? => $body:block)+
-    }) => {
-
+macro_rules! static_node {
+    (
+        $name:ident ( $request:ident , $client_cmd_tx:ident $(, $app_state:ident)? ) {
+            $(
+                $method:tt
+                [ $($flags:ident)|* , $access:ident , $methodparam:expr , $methodresult:expr ]
+                $(
+                    { $( ($signame:expr, $sigval:expr) ),* $(,)? }
+                )?
+                $( ( $param:ident : $type:ty ) )?
+                => $body:block
+            )+
+        }
+    ) => {
         {
-            const METHODS: &[$crate::clientnode::MetaMethod] = &[
-                $($crate::clientnode::MetaMethod::new_static(
-                    $method,
-                    $($crate::clientnode::Flag::$flags as u32)|+,
-                    $crate::clientnode::AccessLevel::$access,
-                    $methodparam,
-                    $methodresult,
-                    &[$($(($signame, $sigval)),*)?],
-                    "",
-                ),)+
-            ];
+            pub struct $name;
 
-            async fn $fn_name($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender $(, $app_state: Option<$crate::AppState<$T>>)?) {
+            #[async_trait::async_trait]
+            impl $crate::clientnode::StaticNode for $name {
 
-                use $crate::shvrpc::RpcMessageMetaTags;
+                fn methods(&self) -> &'static [$crate::clientnode::MetaMethod] {
+                    const METHODS: &[$crate::clientnode::MetaMethod] =
+                    &[
+                        $(
+                            $crate::clientnode::MetaMethod::new_static(
+                                $method,
+                                0 $(| $crate::clientnode::Flag::$flags as u32 )*,
+                                $crate::clientnode::AccessLevel::$access,
+                                $methodparam,
+                                $methodresult,
+                                &[
+                                    $($(($signame, $sigval)),*)?
+                                ],
+                                "",
+                            )
+                        ),+
+                    ];
+                    METHODS
+                }
 
-                if $request.shv_path().unwrap_or_default().is_empty() {
-                    let mut __resp = $request.prepare_response().unwrap_or_default();
-                    $(
-                        let Some($app_state) = $app_state else {
-                            log::error!("{}: Application state should be Some", stringify!($fn_name));
-                            __resp.set_error($crate::shvrpc::rpcmessage::RpcError::new($crate::shvrpc::rpcmessage::RpcErrorCode::InternalError, "Ill-formed method implementation"));
-                            if let Err(e) = $client_cmd_tx.send_message(__resp) {
-                                log::error!("{}: Cannot send response ({e})", stringify!($fn_name));
+                async fn process_request(
+                    &self,
+                    $request: $crate::shvrpc::rpcmessage::RpcMessage,
+                    $client_cmd_tx: $crate::ClientCommandSender
+                ) -> Option<$crate::clientnode::RequestResult>
+                {
+                    use $crate::shvrpc::RpcMessageMetaTags;
+
+                    match $request.method() {
+                        $(
+                            Some($method) => {
+                                $crate::method_handler!(
+                                    $( ($param : $type) )?
+                                    $method @ $request @ $body
+                                )
                             }
-                            return;
-                        };
-                    )?
-
-                    async fn handler($request: $crate::shvrpc::rpcmessage::RpcMessage, $client_cmd_tx: $crate::ClientCommandSender $(, $app_state: $crate::AppState<$T>)?)
-                    -> Option<std::result::Result<$crate::clientnode::RpcValue, $crate::clientnode::RpcError>> {
-                        match $request.method() {
-
-                            $(Some($method) => {
-                                $crate::method_handler!($(($param : $type))? $method @ $request @ $body)
-                            })+
+                        )+
 
                             _ => Some(Err($crate::clientnode::RpcError::new(
                                         $crate::clientnode::RpcErrorCode::MethodNotFound,
-                                        format!("Invalid method: {:?}", $request.method())))
-                            )
-                        }
+                                        format!("Invalid method: {:?}", $request.method())
+                            ))),
                     }
-
-                    if let Some(val) = handler($request, $client_cmd_tx.clone() $(, $app_state)?).await {
-                        if let Ok(res) = val {
-                            __resp.set_result(res);
-                        } else if let Err(err) = val {
-                            __resp.set_error(err);
-                        }
-
-                        if let Err(e) = $client_cmd_tx.send_message(__resp) {
-                            log::error!("{}: Cannot send response ({e})", stringify!($fn_name));
-                        }
-                    }
-                };
+                }
             }
-
-            $crate::clientnode::ClientNode::fixed(
-                METHODS,
-                [$crate::clientnode::Route::new(
-                    [$($method),+],
-                    $crate::request_handler!($fn_name $(,$app_state)?),
-                )]
-            )
+            $name
         }
     }
 }
 
+/// `impl_static_node` macro generates a `StaticNode` trait impl block for a custom type.
+///
+/// The syntax is equivalent to the `static_node` macro, it just takes one
+/// extra parameter `&self` that is provided in the method handlers.
+///
+/// Unlike `static_node` this macro does not generate any expression, only
+/// the impl block.
 #[macro_export]
-macro_rules! request_handler {
-    ($fn_name:ident) => {
-        $crate::RequestHandler::stateless($fn_name)
-    };
-    ($fn_name:ident, $app_state:ident) => {
-        $crate::RequestHandler::stateful($fn_name)
+macro_rules! impl_static_node {
+    (
+        $type:ident ( & $self_ident:ident , $request:ident , $client_cmd_tx:ident ) {
+            $(
+                $method:tt
+                [ $($flags:ident)|* , $access:ident , $methodparam:expr , $methodresult:expr ]
+                $(
+                    { $( ($signame:expr, $sigval:expr) ),* $(,)? }
+                )?
+                $( ( $param:ident : $ptype:ty ) )?
+                => $body:block
+            )+
+        }
+    ) => {
+
+        #[async_trait::async_trait]
+        impl $crate::clientnode::StaticNode for $type {
+
+            fn methods(&self) -> &'static [$crate::clientnode::MetaMethod] {
+                const METHODS: &[$crate::clientnode::MetaMethod] =
+                &[
+                    $(
+                        $crate::clientnode::MetaMethod::new_static(
+                            $method,
+                            0 $(| $crate::clientnode::Flag::$flags as u32 )*,
+                            $crate::clientnode::AccessLevel::$access,
+                            $methodparam,
+                            $methodresult,
+                            &[
+                                $($(($signame, $sigval)),*)?
+                            ],
+                            "",
+                        )
+                    ),+
+                ];
+                METHODS
+            }
+
+            async fn process_request(
+                &$self_ident,
+                $request: $crate::shvrpc::rpcmessage::RpcMessage,
+                $client_cmd_tx: $crate::ClientCommandSender,
+            ) -> Option<$crate::clientnode::RequestResult>
+            {
+                use $crate::shvrpc::RpcMessageMetaTags;
+
+                match $request.method() {
+                    $(
+                        Some($method) => {
+                            $crate::method_handler!(
+                                $( ($param : $ptype) )?
+                                $method @ $request @ {
+                                    // Inject `self` into user body
+                                    let $self_ident = $self_ident;
+                                    $body
+                                }
+                            )
+                        }
+                    )+
+
+                    _ => Some(Err($crate::clientnode::RpcError::new(
+                        $crate::clientnode::RpcErrorCode::MethodNotFound,
+                        format!("Invalid method: {:?}", $request.method())
+                    ))),
+                }
+            }
+        }
     };
 }
 

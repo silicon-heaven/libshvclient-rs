@@ -1,5 +1,6 @@
+use std::sync::atomic::AtomicI32;
+
 use shvclient::appnodes::DotAppNode;
-use shvclient::client::MetaMethods;
 use tokio::sync::RwLock;
 
 use clap::Parser;
@@ -7,8 +8,7 @@ use futures::{select, FutureExt, StreamExt};
 use log::*;
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::RpcMessage;
-use shvclient::{MethodsGetter, RequestHandler};
-use shvclient::clientnode::{ClientNode, PROPERTY_METHODS, SIG_CHNG};
+use shvclient::clientnode::SIG_CHNG;
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver, AppState};
 use simple_logger::SimpleLogger;
 use shvproto::{RpcValue, FromRpcValue, ToRpcValue};
@@ -144,20 +144,22 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
     let client_config = load_client_config(cli_opts).expect("Invalid config");
 
     let counter = AppState::new(RwLock::new(-10));
-    let cnt = counter.clone();
 
-    let app_tasks = move |client_cmd_tx, client_evt_rx| {
-        tokio::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
+    let app_tasks = {
+        let counter = counter.clone();
+        move |client_cmd_tx, client_evt_rx| {
+            tokio::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
+        }
     };
 
-    async fn dyn_methods_getter(_path: String, _: ClientCommandSender, _: Option<AppState<State>>) -> Option<MetaMethods> {
-        Some(MetaMethods::from(&PROPERTY_METHODS))
-    }
-    async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender) {
-    }
+    // async fn dyn_methods_getter(_path: String, _: ClientCommandSender, _: Option<AppState<State>>) -> Option<MetaMethods> {
+    //     Some(MetaMethods::from(&PROPERTY_METHODS))
+    // }
+    // async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender) {
+    // }
 
-    let stateless_node = shvclient::fixed_node!{
-        device_handler<State>(request, _tx ) {
+    let params_node = shvclient::static_node!{
+        ParamsNode(request, _tx ) {
             "something" [IsGetter, Browse, "", ""] (param: i32) => {
                 println!("param: {param}");
                 Some(Ok(RpcValue::from("name result")))
@@ -195,10 +197,15 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     };
 
-    let delay_node = shvclient::fixed_node!(
-        delay_handler<State>(request, client_cmd_tx, app_state) {
+
+    struct DelayNode {
+        app_state: AppState<RwLock<i32>>,
+    }
+    shvclient::impl_static_node!(
+        DelayNode(&self, request, client_cmd_tx) {
             "getDelayed" [None, Browse, "", ""] { ("delayedmod", None) } => {
                 let mut resp = request.prepare_response().unwrap_or_default();
+                let app_state = self.app_state.clone();
                 tokio::task::spawn(async move {
                     let mut counter = app_state
                         .write()
@@ -225,24 +232,54 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     );
 
-    let root_node = shvclient::fixed_node!(
-        root_handler<State>(request, _client_cmd_tx) {
+    let root_node = shvclient::static_node!(
+        RootNode(request, _client_cmd_tx) {
             "info" [None, Read, "", ""] => {
                 Some(Ok("Simple device tokio".into()))
             }
         }
     );
 
+
+    struct CustomNode {
+        foo: AtomicI32,
+    }
+
+    shvclient::impl_static_node!(
+        CustomNode(&self, request, _tx) {
+            "secret" [IsGetter, Browse, "", ""] (param: i32) => {
+                println!("param: {param}, {method:?}", method = request.method());
+                Some(Ok(self.foo.fetch_add(1, std::sync::atomic::Ordering::SeqCst).into()))
+            }
+        }
+    );
+
+    let static_node = shvclient::static_node! {
+        DeviceNode(request, _tx) {
+            "something" [IsGetter, Browse, "", ""] (param: i32) => {
+                println!("param: {param}, {method:?}", method = request.method());
+                Some(Ok(RpcValue::from("name result")))
+            }
+            "get" [IsGetter, Browse, "", ""] => {
+                Some(Ok(RpcValue::from(42)))
+            }
+            "setName" [IsGetter|IsSetter, Browse, "", ""] { ("nameChanged", Some("String")) } (param: String) => {
+                println!("updated to: {param}");
+                Some(Ok(RpcValue::from(true)))
+            }
+        }
+    };
+
     shvclient::Client::new()
         .app(DotAppNode::new("simple_device_tokio"))
-        .mount("", root_node)
-        .mount("stateless", stateless_node)
-        .mount("status/delayed", delay_node)
-        .mount("status/dyn", ClientNode::dynamic(
-                MethodsGetter::new(dyn_methods_getter),
-                RequestHandler::stateless(dyn_handler)))
-        .with_app_state(cnt)
+        .mount_static("", root_node)
+        .mount_static("static", static_node)
+        .mount_static("static/custom", CustomNode { foo: 1234.into() })
+        .mount_static("status/delayed", DelayNode { app_state: counter })
+        .mount_static("status/params", params_node)
+        // .mount("status/dyn", ClientNode::dynamic(
+        //         MethodsGetter::new(dyn_methods_getter),
+        //         RequestHandler::stateless(dyn_handler)))
         .run_with_init(&client_config, app_tasks)
-        // .run(&client_config)
         .await
 }

@@ -21,10 +21,8 @@ pub use client::{
     ClientCommandSender,
     ClientEvent,
     ClientEventsReceiver,
-    MethodsGetter,
-    RequestHandler,
 };
-pub use clientnode::Route;
+pub use clientnode::RequestHandler;
 pub use connection::ConnectionFailedKind;
 
 // Reexport for version compatibility

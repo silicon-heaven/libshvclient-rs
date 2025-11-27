@@ -45,7 +45,7 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
             heartbeat_interval: Duration::from_secs(60),
             reconnect_interval: None,
         };
-        shvclient::client::Client::<_,()>::new_plain()
+        shvclient::client::Client::new_plain()
             .run_with_init(&client_config, |commands_tx, events_rx| {
                 tx.send((commands_tx, events_rx))
                     .unwrap_or_else(|(commands_tx, _)| {
