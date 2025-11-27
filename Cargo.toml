@@ -56,6 +56,7 @@ macro_magic = "0.6.0"
 futures-rustls = "0.26.0"
 rustls-pemfile = "2.2.0"
 rustls-platform-verifier = "0.6.1"
+async-trait = "0.1.89"
 
 
 # For local development

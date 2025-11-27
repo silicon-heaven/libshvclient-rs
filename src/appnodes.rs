@@ -1,6 +1,9 @@
 
-use crate::clientnode::{ConstantNode, METH_PING};
+use crate::clientnode::{StaticNode, METH_PING};
+use crate::ClientCommandSender;
+use async_trait::async_trait;
 use shvrpc::metamethod::{AccessLevel, Flag, MetaMethod};
+use shvrpc::rpcmessage::RpcErrorCode;
 use shvrpc::{RpcMessageMetaTags, RpcMessage, rpcmessage::RpcError};
 use shvproto::RpcValue;
 
@@ -13,8 +16,8 @@ const METH_SERIAL_NUMBER: &str = "serialNumber";
 const SHV_VERSION_MAJOR: i32 = 3;
 const SHV_VERSION_MINOR: i32 = 0;
 
-pub const DOT_APP_METHODS: &[&MetaMethod] = &[
-    &MetaMethod::new_static(
+pub const DOT_APP_METHODS: &[MetaMethod] = &[
+    MetaMethod::new_static(
         METH_SHV_VERSION_MAJOR,
         Flag::IsGetter as u32,
         AccessLevel::Browse,
@@ -23,7 +26,7 @@ pub const DOT_APP_METHODS: &[&MetaMethod] = &[
         &[],
         "",
     ),
-    &MetaMethod::new_static(
+    MetaMethod::new_static(
         METH_SHV_VERSION_MINOR,
         Flag::IsGetter as u32,
         AccessLevel::Browse,
@@ -32,7 +35,7 @@ pub const DOT_APP_METHODS: &[&MetaMethod] = &[
         &[],
         "",
     ),
-    &MetaMethod::new_static(
+    MetaMethod::new_static(
         METH_NAME,
         Flag::IsGetter as u32,
         AccessLevel::Browse,
@@ -41,7 +44,7 @@ pub const DOT_APP_METHODS: &[&MetaMethod] = &[
         &[],
         "",
     ),
-    &MetaMethod::new_static(
+    MetaMethod::new_static(
         METH_PING,
         Flag::None as u32,
         AccessLevel::Browse,
@@ -68,24 +71,29 @@ impl DotAppNode {
     }
 }
 
-impl ConstantNode for DotAppNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
-        DOT_APP_METHODS.to_vec()
+fn err_method_not_found() -> RpcError {
+    RpcError::new(RpcErrorCode::MethodNotFound, "method not found")
+}
+
+#[async_trait]
+impl StaticNode for DotAppNode {
+    fn methods(&self) -> &'static [MetaMethod] {
+        DOT_APP_METHODS
     }
 
-    fn process_request(&self, request: &RpcMessage) -> Option<Result<RpcValue, RpcError>> {
-        match request.method() {
-            Some(METH_SHV_VERSION_MAJOR) => Some(self.shv_version_major.into()),
-            Some(METH_SHV_VERSION_MINOR) => Some(self.shv_version_minor.into()),
-            Some(METH_NAME) => Some(RpcValue::from(&self.app_name)),
-            Some(METH_PING) => Some(().into()),
-            _ => None,
-        }.map(Ok)
+    async fn process_request(&self, request: RpcMessage, _: ClientCommandSender) -> Option<Result<RpcValue, RpcError>> {
+        Some(match request.method() {
+            Some(METH_SHV_VERSION_MAJOR) => Ok(self.shv_version_major.into()),
+            Some(METH_SHV_VERSION_MINOR) => Ok(self.shv_version_minor.into()),
+            Some(METH_NAME) => Ok(RpcValue::from(&self.app_name)),
+            Some(METH_PING) => Ok(().into()),
+            _ => Err(err_method_not_found()),
+        })
     }
 }
 
-pub const DOT_DEVICE_METHODS: &[&MetaMethod] = &[
-    &MetaMethod::new_static(
+pub const DOT_DEVICE_METHODS: &[MetaMethod] = &[
+    MetaMethod::new_static(
         METH_NAME,
         Flag::IsGetter as u32,
         AccessLevel::Browse,
@@ -94,7 +102,7 @@ pub const DOT_DEVICE_METHODS: &[&MetaMethod] = &[
         &[],
         "",
     ),
-    &MetaMethod::new_static(
+    MetaMethod::new_static(
         METH_VERSION,
         Flag::IsGetter as u32,
         AccessLevel::Browse,
@@ -103,7 +111,7 @@ pub const DOT_DEVICE_METHODS: &[&MetaMethod] = &[
         &[],
         "",
     ),
-    &MetaMethod::new_static(
+    MetaMethod::new_static(
         METH_SERIAL_NUMBER,
         Flag::IsGetter as u32,
         AccessLevel::Browse,
@@ -130,21 +138,71 @@ impl DotDeviceNode {
     }
 }
 
-impl ConstantNode for DotDeviceNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
-        DOT_DEVICE_METHODS.to_vec()
+#[async_trait]
+impl StaticNode for DotDeviceNode {
+    fn methods(&self) -> &'static [MetaMethod] {
+        DOT_DEVICE_METHODS
     }
 
-    fn process_request(&self, request: &RpcMessage) -> Option<Result<RpcValue, RpcError>> {
-        match request.method() {
-            Some(METH_NAME) => Some(RpcValue::from(&self.device_name)),
-            Some(METH_VERSION) => Some(RpcValue::from(&self.version)),
+    async fn process_request(&self, request: RpcMessage, _:ClientCommandSender) -> Option<Result<RpcValue, RpcError>> {
+        Some(match request.method() {
+            Some(METH_NAME) => Ok(RpcValue::from(&self.device_name)),
+            Some(METH_VERSION) => Ok(RpcValue::from(&self.version)),
             Some(METH_SERIAL_NUMBER) => match &self.serial_number {
-                None => Some(RpcValue::null()),
-                Some(sn) => Some(RpcValue::from(sn)),
+                None => Ok(RpcValue::null()),
+                Some(sn) => Ok(RpcValue::from(sn)),
             },
-            _ => None,
-        }.map(Ok)
+            _ => Err(err_method_not_found()),
+        })
     }
 }
 
+// #[async_trait]
+// impl StaticNode for DeviceNode {
+//     fn methods(&self) -> &'static [MetaMethod] {
+//         &[
+//             MetaMethod::new_static(
+//                 "something",
+//                 Flag::IsGetter as u32,
+//                 AccessLevel::Browse,
+//                 "",
+//                 "",
+//                 &[],
+//                 "",
+//             ),
+//             MetaMethod::new_static(
+//                 "get",
+//                 Flag::IsGetter as u32,
+//                 AccessLevel::Browse,
+//                 "",
+//                 "",
+//                 &[],
+//                 "",
+//             ),]
+//     }
+//
+//     async fn process_request(&self, request: RpcMessage, tx: ClientCommandSender) -> Option<Result<RpcValue, RpcError>> {
+//         match request.method() {
+//             Some("something") => {
+//                 let request_param = request.param().unwrap_or_default();
+//
+//                 match <i32>::try_from(request_param) {
+//                     Ok(param) => {
+//                         println!("param: {param}");
+//                         Some(Ok(RpcValue::from("name result")))
+//                     }
+//                     Err(err) => Some(Err(crate::clientnode::RpcError::new(
+//                                 crate::clientnode::RpcErrorCode::InvalidParam,
+//                                 format!("Wrong parameter for `{}`: {}",
+//                                     "something",
+//                                     err
+//                                 ))))
+//                 }
+//             }
+//             Some("get") => {
+//                 Some(Ok(RpcValue::from(42)))
+//             }
+//             _ => Some(Err(err_method_not_found())),
+//         }
+//     }
+// }
