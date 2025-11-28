@@ -1,14 +1,14 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use futures::{select, FutureExt};
 use futures_time::time::Duration;
 use log::*;
-use shvrpc::metamethod::{Flag, MetaMethod};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
-use shvrpc::{RpcMessage, RpcMessageMetaTags};
+use shvrpc::RpcMessage;
 use shvclient::appnodes::{DotAppNode, DotDeviceNode};
-use shvclient::clientnode::{ClientNode, SIG_CHNG};
-use shvclient::RequestHandler;
-use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver, Route, AppState};
+use shvclient::clientnode::SIG_CHNG;
+use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use smol::lock::RwLock;
 use url::Url;
@@ -78,54 +78,42 @@ fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
     Ok(config)
 }
 
-const METH_GET_DELAYED: &str = "getDelayed";
 
-const DELAY_METHODS: &[MetaMethod] = &[
-    MetaMethod::new_static(
-        METH_GET_DELAYED,
-        Flag::IsGetter as u32,
-        shvrpc::metamethod::AccessLevel::Browse,
-        "",
-        "",
-        &[],
-        "",
-    )
-];
+type AppState = Arc<RwLock<i32>>;
 
-type State = RwLock<i32>;
-
-async fn delay_node_process_request(
-    request: RpcMessage,
-    client_cmd_tx: ClientCommandSender,
-    state: Option<AppState<State>>,
-) {
-    if request.shv_path().unwrap_or_default().is_empty() {
-        assert_eq!(request.method(), Some(METH_GET_DELAYED));
-        let mut resp = request.prepare_response().unwrap_or_default();
-        smol::spawn(async move {
-            let mut counter = state
-                .expect("Missing state for delay node")
-                .write_arc()
-                .await;
-            let ret_val = {
-                *counter += 1;
-                *counter
-            };
-            drop(counter);
-            futures_time::task::sleep(Duration::from_secs(3)).await;
-            resp.set_result(ret_val);
-            if let Err(e) = client_cmd_tx.send_message(resp) {
-                error!("delay_node_process_request: Cannot send response ({e})");
-            }
-        }).detach();
-    }
+struct DelayNode {
+    state: AppState,
 }
 
+shvclient::impl_static_node! {
+    DelayNode(&self, request, client_cmd_tx) {
+        "getDelayed" [IsGetter, Browse, "", ""] => {
+            let mut resp = request.prepare_response().unwrap_or_default();
+            let state = self.state.clone();
+            smol::spawn(async move {
+                let mut counter = state
+                    .write_arc()
+                    .await;
+                let ret_val = {
+                    *counter += 1;
+                    *counter
+                };
+                drop(counter);
+                futures_time::task::sleep(Duration::from_secs(3)).await;
+                resp.set_result(ret_val);
+                if let Err(e) = client_cmd_tx.send_message(resp) {
+                    error!("delay_node_process_request: Cannot send response ({e})");
+                }
+            }).detach();
+            None
+        }
+    }
+}
 
 async fn emit_chng_task(
     client_cmd_tx: ClientCommandSender,
     mut client_evt_rx: ClientEventsReceiver,
-    app_state: AppState<State>,
+    app_state: AppState,
 ) -> shvrpc::Result<()> {
     info!("signal task started");
 
@@ -180,10 +168,12 @@ fn main() -> shvrpc::Result<()> {
     let client_config = load_client_config(cli_opts).expect("Invalid config");
 
     let counter = AppState::new(RwLock::new(-10));
-    let cnt = counter.clone();
 
-    let app_tasks = move |client_cmd_tx, client_evt_rx| {
-        smol::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter)).detach();
+    let app_tasks = {
+        let counter = counter.clone();
+        move |client_cmd_tx, client_evt_rx| {
+            smol::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter)).detach();
+        }
     };
 
     const SMOL_THREADS: &str = "SMOL_THREADS";
@@ -196,16 +186,8 @@ fn main() -> shvrpc::Result<()> {
         shvclient::Client::new()
             .app(DotAppNode::new("simple_device_smol"))
             .device(DotDeviceNode::new("simple_device", "0.1", Some("00000".into())))
-            .mount("status/delayed", ClientNode::fixed(
-                    DELAY_METHODS,
-                    [Route::new(
-                        [METH_GET_DELAYED],
-                        RequestHandler::stateful(delay_node_process_request),
-                    )]
-            ))
-            .with_app_state(cnt)
+            .mount_static("status/delayed", DelayNode { state: counter })
             .run_with_init(&client_config, app_tasks)
-            // .run(&client_config)
             .await
     })
 }
