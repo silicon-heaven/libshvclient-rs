@@ -1,5 +1,5 @@
 use crate::connection::{spawn_connection_task, ConnectionCommand, ConnectionEvent, ConnectionFailedKind};
-use crate::clientnode::{process_local_dir_ls, ClientNode, RequestHandler, StaticNode, METH_DIR, METH_LS, METH_PING};
+use crate::clientnode::{process_local_dir_ls, ClientNode, RequestHandlerResult, StaticNode, METH_DIR, METH_LS, METH_PING};
 use async_broadcast::RecvError;
 use futures::stream::{self, FuturesUnordered};
 use futures::{select, FutureExt, Stream, StreamExt};
@@ -796,8 +796,12 @@ impl Client<Full> {
         self
     }
 
-    pub fn mount_dynamic(mut self, path: impl Into<String>, request_handler: RequestHandler) -> Self {
-        self.mounts.insert(path.into(), ClientNode::new_dynamic(request_handler));
+    pub fn mount_dynamic<F, Fut>(mut self, path: impl Into<String>, handler: F) -> Self
+    where
+        F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
+        Fut: Future<Output = RequestHandlerResult> + Send + Sync + 'static
+    {
+        self.mounts.insert(path.into(), ClientNode::new_dynamic(handler));
         self
     }
 
@@ -1937,8 +1941,8 @@ mod tests {
 
             Client::new()
                 .app(DotAppNode::new("test"))
-                .mount_dynamic("dynamic/sync", RequestHandler::new(request_handler))
-                .mount_dynamic("dynamic/async", RequestHandler::new(request_handler))
+                .mount_dynamic("dynamic/sync", request_handler)
+                .mount_dynamic("dynamic/async", request_handler)
                 .mount_static("static", PropertyNode)
                 .rpc_call_timeout(Duration::from_secs(10))
 

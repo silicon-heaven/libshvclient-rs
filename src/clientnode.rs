@@ -127,9 +127,10 @@ pub trait StaticNode: Send + Sync + 'static {
     async fn process_request(&self, request: RpcMessage, client_cmd_tx: ClientCommandSender) -> Option<RequestResult>;
 }
 
-pub struct StaticNodeWrapper(Arc<dyn StaticNode>);
+pub struct StaticNodeHandler(Arc<dyn StaticNode>);
 
-pub struct RequestHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Sync + Send>);
+pub struct DynamicNodeHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Sync + Send>);
+
 pub struct MethodHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, MethodHandlerResult<RpcValue>> + Sync + Send>);
 pub struct LsHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, LsHandlerResult> + Sync + Send>);
 
@@ -154,11 +155,11 @@ pub type LsHandlerResult = MethodHandlerResult<Vec<String>>;
 pub type MetaMethods = Cow<'static, [MetaMethod]>;
 
 pub enum ClientNode {
-    Static(StaticNodeWrapper),
-    Dynamic(RequestHandler),
+    Static(StaticNodeHandler),
+    Dynamic(DynamicNodeHandler),
 }
 
-impl RequestHandler {
+impl DynamicNodeHandler {
     pub fn new<F, Fut>(func: F) -> Self
     where
         F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
@@ -194,16 +195,20 @@ impl LsHandler {
 
 impl ClientNode {
     pub fn new_static(node: impl StaticNode) -> Self {
-        Self::Static(StaticNodeWrapper(Arc::new(node)))
+        Self::Static(StaticNodeHandler(Arc::new(node)))
     }
 
-    pub fn new_dynamic(handler: RequestHandler) -> Self {
-        Self::Dynamic(handler)
+    pub fn new_dynamic<F, Fut>(func: F) -> Self
+    where
+        F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
+        Fut: Future<Output = RequestHandlerResult> + Send + Sync + 'static
+    {
+        Self::Dynamic(DynamicNodeHandler::new(func))
     }
 
     pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender) {
         match &self {
-            Self::Static(StaticNodeWrapper(node)) => {
+            Self::Static(StaticNodeHandler(node)) => {
                 // TODO: Implement process_request for Node variant types and use it for tests
                 let methods  = if request.shv_path().unwrap_or_default().is_empty() {
                     DIR_LS_METHODS.iter().chain(node.methods()).collect()
@@ -233,7 +238,7 @@ impl ClientNode {
                     }).detach();
                 }
             },
-            Self::Dynamic(RequestHandler(request_handler)) => {
+            Self::Dynamic(DynamicNodeHandler(request_handler)) => {
                 let request_handler = request_handler.clone();
                 spawn_task(async move {
                     match request_handler(request.clone(), client_cmd_tx.clone()).await {
