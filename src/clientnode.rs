@@ -2,7 +2,7 @@ use crate::ClientCommandSender;
 use crate::runtime::spawn_task;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use log::{error, debug};
+use log::error;
 use shvrpc::rpcdiscovery::{DirParam, LsParam};
 use shvrpc::rpcframe::RpcFrame;
 use shvrpc::util::{children_on_path, find_longest_path_prefix};
@@ -18,8 +18,7 @@ pub use shvrpc::metamethod::{AccessLevel, Flag, MetaMethod};
 pub use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 pub use shvproto::{RpcValue, Value};
 
-
-fn dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: impl Into<DirParam>) -> RpcValue {
+fn builtin_dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: impl Into<DirParam>) -> RpcValue {
     match param.into() {
         DirParam::Brief => {
             methods
@@ -79,7 +78,7 @@ pub(crate) fn process_local_dir_ls<V>(
     if method == METH_DIR && is_in_tree && !is_direct_mountpoint {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
-            let dir = dir(DIR_LS_METHODS, rpcmsg.param());
+            let dir = builtin_dir(DIR_LS_METHODS, rpcmsg.param());
             return Some(RequestResult::Ok(dir));
         } else {
             return Some(RequestResult::Err(RpcError::new(
@@ -127,12 +126,14 @@ pub trait StaticNode: Send + Sync + 'static {
     async fn process_request(&self, request: RpcMessage, client_cmd_tx: ClientCommandSender) -> Option<RequestResult>;
 }
 
+#[derive(Clone)]
 pub struct StaticNodeHandler(Arc<dyn StaticNode>);
 
-pub struct DynamicNodeHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Sync + Send>);
+#[derive(Clone)]
+pub struct DynamicNodeHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Send + Sync>);
 
-pub struct MethodHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, MethodHandlerResult<RpcValue>> + Sync + Send>);
-pub struct LsHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, LsHandlerResult> + Sync + Send>);
+pub struct MethodHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, MethodHandlerResult<RpcValue>> + Send>);
+pub struct LsHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, LsHandlerResult> + Send>);
 
 pub enum MethodHandlerType {
     Dir,
@@ -159,13 +160,147 @@ pub enum ClientNode {
     Dynamic(DynamicNodeHandler),
 }
 
+#[async_trait]
+trait NodeHandler {
+    async fn process_request(
+        &self,
+        request: &RpcMessage,
+        mount_path: &str,
+        client_cmd_tx: &ClientCommandSender,
+    ) -> Option<Result<RpcValue, RpcError>>;
+}
+
+#[async_trait]
+impl NodeHandler for StaticNodeHandler {
+    async fn process_request(
+        &self,
+        request: &RpcMessage,
+        mount_path: &str,
+        client_cmd_tx: &ClientCommandSender,
+    ) -> Option<Result<RpcValue, RpcError>>
+    {
+        let Self(node) = self;
+
+        let is_path_of_this_node = request.shv_path().unwrap_or_default().is_empty();
+        let methods = if is_path_of_this_node {
+            DIR_LS_METHODS.iter().chain(node.methods()).collect()
+        } else {
+            // Static nodes don't have children; children resolved in process_local_dir_ls
+            Cow::from(&[])
+        };
+
+        let granted_method = match check_request_access(
+            request,
+            mount_path,
+            methods.iter().copied())
+        {
+            Ok(method) => method,
+            Err(err) => return Some(Err(err)),
+        };
+
+        match granted_method {
+            crate::clientnode::METH_DIR =>
+               Some(Ok(builtin_dir(methods.iter().copied(), request.param()))),
+            crate::clientnode::METH_LS =>
+                Some(Ok(builtin_ls(request.param()))),
+            _ =>
+                node.process_request(request.clone(), client_cmd_tx.clone()).await,
+        }
+    }
+}
+
 impl DynamicNodeHandler {
     pub fn new<F, Fut>(func: F) -> Self
     where
         F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = RequestHandlerResult> + Send + Sync + 'static
+        Fut: Future<Output = RequestHandlerResult> + Send + 'static
     {
         Self(Arc::new(move |rq, tx| Box::pin(func(rq, tx))))
+    }
+}
+
+#[async_trait]
+impl NodeHandler for DynamicNodeHandler {
+    async fn process_request(
+        &self,
+        request: &RpcMessage,
+        mount_path: &str,
+        client_cmd_tx: &ClientCommandSender,
+    ) -> Option<Result<RpcValue, RpcError>>
+    {
+        let Self(request_handler) = self;
+        match request_handler(request.clone(), client_cmd_tx.clone()).await {
+            Ok(ResolvedRequest { methods, handler }) => {
+                fn get_method<'a>(methods: &'a MetaMethods, name: &str) -> Option<(usize, &'a MetaMethod)> {
+                    methods
+                        .iter()
+                        .enumerate()
+                        .find(|(_, mm)| mm.name == name)
+                }
+                fn extract_second_field<A, B>(tuple: (A, B)) -> B { tuple.1 }
+                match handler {
+                    MethodHandlerType::Dir => {
+                        let all_methods = |methods: MetaMethods| if methods.is_empty() {
+                            Cow::Borrowed(DIR_LS_METHODS)
+                        } else {
+                            // Make sure that `dir` and `ls` are at the start of the result list. Use either app-provided or default definition.
+                            let dir_ls_methods = match (get_method(&methods, METH_DIR), get_method(&methods, METH_LS)) {
+                                (None, None) => [META_METHOD_DIR, META_METHOD_LS],
+                                (None, Some((_, mm_ls))) => [META_METHOD_DIR, mm_ls.to_owned()],
+                                (Some((_, mm_dir)), None) => [mm_dir.to_owned(), META_METHOD_LS],
+                                (Some((0, _mm_dir)), Some((1, _mm_ls))) => {
+                                    // The methods are already in the correct order, so we can
+                                    // return them right away.
+                                    return methods
+                                }
+                                (Some((_, mm_dir)), Some((_, mm_ls))) => [mm_dir.to_owned(), mm_ls.to_owned()],
+                            };
+                            dir_ls_methods
+                                .into_iter()
+                                .chain(methods
+                                    .into_owned()
+                                    .into_iter()
+                                    .filter(|mm| mm.name != METH_DIR && mm.name != METH_LS)
+                                )
+                                .collect()
+                        };
+                        let mm_dir = get_method(&methods, METH_DIR)
+                            .map_or(static_ref::META_METHOD_DIR, extract_second_field);
+                        let response = check_request_access_for_method(request, mount_path, mm_dir)
+                            .map(|_| builtin_dir(all_methods(methods).as_ref(), request.param()));
+                        Some(response)
+                    }
+                    MethodHandlerType::Ls(LsHandler(ls_handler)) => {
+                        let mm_ls = get_method(&methods, METH_LS)
+                            .map_or(static_ref::META_METHOD_LS, extract_second_field);
+                        if let Err(err) = check_request_access_for_method(request, mount_path, mm_ls) {
+                            return Some(Err(err));
+                        }
+                        ls_handler(request.clone(), client_cmd_tx.clone())
+                            .await
+                            .map(|ls_result|
+                                ls_result.and_then(|children|
+                                    ls_children_to_result(Some(children), request.param())
+                                )
+                            )
+                    },
+                    MethodHandlerType::Method { name, handler: MethodHandler(handler) } => {
+                        let Some((_, mm)) = get_method(&methods, &name) else {
+                            let err = rpc_error_unknown_method_on_path(
+                                full_shv_path(mount_path, request.shv_path().unwrap_or_default()),
+                                name
+                            );
+                            return Some(Err(err));
+                        };
+                        if let Err(err) = check_request_access_for_method(request, mount_path, mm) {
+                            return Some(Err(err));
+                        }
+                        handler(request.clone(), client_cmd_tx.clone()).await
+                    }
+                }
+            }
+            Err(err) => Some(Err(err)),
+        }
     }
 }
 
@@ -192,7 +327,6 @@ impl LsHandler {
     }
 }
 
-
 impl ClientNode {
     pub fn new_static(node: impl StaticNode) -> Self {
         Self::Static(StaticNodeHandler(Arc::new(node)))
@@ -201,122 +335,30 @@ impl ClientNode {
     pub fn new_dynamic<F, Fut>(func: F) -> Self
     where
         F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = RequestHandlerResult> + Send + Sync + 'static
+        Fut: Future<Output = RequestHandlerResult> + Send + 'static
     {
         Self::Dynamic(DynamicNodeHandler::new(func))
     }
 
     pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender) {
-        match &self {
-            Self::Static(StaticNodeHandler(node)) => {
-                // TODO: Implement process_request for Node variant types and use it for tests
-                let methods  = if request.shv_path().unwrap_or_default().is_empty() {
-                    DIR_LS_METHODS.iter().chain(node.methods()).collect()
-                } else {
-                    // Static nodes do not have any own children. Any child nodes are
-                    // resolved on the mounts tree level in `process_local_dir_ls()`.
-                    Cow::from(&[])
-                };
-                if !resolve_request_access(&request, &mount_path, &client_cmd_tx, methods.iter().copied()) {
-                    return
+        fn spawn_task_for_handler(
+            handler: impl NodeHandler + Send + 'static,
+            request: RpcMessage,
+            mount_path: String,
+            client_cmd_tx: ClientCommandSender
+        ) {
+            spawn_task(async move {
+                if let Some(result) = handler.process_request(&request, &mount_path, &client_cmd_tx).await {
+                    send_response(&request, &client_cmd_tx, result);
                 }
-                let Some(method) = request.method() else {
-                    panic!("Request method should be Some after access check.");
-                };
-                if method == self::METH_DIR {
-                    let result = dir(methods.iter().copied(), request.param());
-                    send_response(&request, &client_cmd_tx, Ok(result));
-                } else if method == self::METH_LS {
-                    let result = default_ls(request.param());
-                    send_response(&request, &client_cmd_tx, Ok(result));
-                } else {
-                    let node = node.clone();
-                    spawn_task(async move {
-                        if let Some(result) = node.process_request(request.clone(), client_cmd_tx.clone()).await {
-                            send_response(&request, &client_cmd_tx, result);
-                        }
-                    }).detach();
-                }
-            },
-            Self::Dynamic(DynamicNodeHandler(request_handler)) => {
-                let request_handler = request_handler.clone();
-                spawn_task(async move {
-                    match request_handler(request.clone(), client_cmd_tx.clone()).await {
-                        Ok(ResolvedRequest { methods, handler }) => {
-                            fn get_method<'a>(methods: &'a MetaMethods, name: &str) -> Option<(usize, &'a MetaMethod)> {
-                                methods
-                                    .iter()
-                                    .enumerate()
-                                    .find(|(_, mm)| mm.name == name)
-                            }
-                            fn extract_second<A, B>(tuple: (A, B)) -> B { tuple.1 }
-                            match handler {
-                                MethodHandlerType::Dir => {
-                                    // TODO: use also for StaticNode methods
-                                    let all_methods = |methods: MetaMethods| if methods.is_empty() {
-                                        Cow::from(DIR_LS_METHODS)
-                                    } else {
-                                        // Make sure that `dir` and `ls` are at the start of the result list. Use either app-provided or default definition.
-                                        let dir_ls_methods = match (get_method(&methods, METH_DIR), get_method(&methods, METH_LS)) {
-                                            (None, None) => [META_METHOD_DIR, META_METHOD_LS],
-                                            (None, Some((_, mm_ls))) => [META_METHOD_DIR, mm_ls.to_owned()],
-                                            (Some((_, mm_dir)), None) => [mm_dir.to_owned(), META_METHOD_LS],
-                                            (Some((0, _mm_dir)), Some((1, _mm_ls))) => {
-                                                // The methods are already in the correct order, so we can
-                                                // return them right away.
-                                                return methods
-                                            }
-                                            (Some((_, mm_dir)), Some((_, mm_ls))) => [mm_dir.to_owned(), mm_ls.to_owned()],
-                                        };
-                                        dir_ls_methods
-                                            .into_iter()
-                                            .chain(methods
-                                                .into_owned()
-                                                .into_iter()
-                                                .filter(|mm| mm.name != METH_DIR && mm.name != METH_LS)
-                                            )
-                                            .collect()
-                                    };
-                                    let mm_dir = get_method(&methods, METH_DIR)
-                                        .map_or(static_ref::META_METHOD_DIR, extract_second);
-                                    let response = check_request_access_for_method(&request, &mount_path, mm_dir)
-                                        .map(|_| dir(all_methods(methods).as_ref(), request.param()));
-                                    send_response(&request, &client_cmd_tx, response);
-                                }
-                                MethodHandlerType::Ls(LsHandler(ls_handler)) => {
-                                    let mm_ls = get_method(&methods, METH_LS)
-                                        .map_or(static_ref::META_METHOD_LS, extract_second);
-                                    if let Err(err) = check_request_access_for_method(&request, &mount_path, mm_ls) {
-                                        send_response(&request, &client_cmd_tx, Err(err));
-                                        return;
-                                    }
-                                    if let Some(ls_result) = ls_handler(request.clone(), client_cmd_tx.clone()).await {
-                                        let response = ls_result
-                                            .and_then(|children| ls_children_to_result(Some(children), request.param()));
-                                        send_response(&request, &client_cmd_tx, response);
-                                    }
-                                },
-                                MethodHandlerType::Method { name, handler: MethodHandler(handler) } => {
-                                    let Some((_, mm)) = get_method(&methods, &name) else {
-                                        let err = rpc_error_unknown_method_on_path(full_shv_path(mount_path, request.shv_path().unwrap_or_default()), name);
-                                        send_response(&request, &client_cmd_tx, Err(err));
-                                        return;
-                                    };
-                                    if let Err(err) = check_request_access_for_method(&request, &mount_path, mm) {
-                                        send_response(&request, &client_cmd_tx, Err(err));
-                                        return;
-                                    }
+            }).detach();
+        }
 
-                                    if let Some(result) = handler(request.clone(), client_cmd_tx.clone()).await {
-                                        send_response(&request, &client_cmd_tx, result);
-                                    }
-                                }
-                            }
-                        }
-                        Err(err) => send_response(&request, &client_cmd_tx, Err(err)),
-                    }
-                }).detach();
-            },
+        match &self {
+            Self::Static(node_handler) =>
+                spawn_task_for_handler(node_handler.clone(), request, mount_path, client_cmd_tx),
+            Self::Dynamic(node_handler) =>
+                spawn_task_for_handler(node_handler.clone(), request, mount_path, client_cmd_tx),
         }
     }
 }
@@ -363,27 +405,17 @@ fn check_request_access_for_method(rq: &RpcMessage, mount_path: impl AsRef<str>,
     }
 }
 
-fn resolve_request_access<'a>(request: &RpcMessage, mount_path: &String, client_cmd_tx: &ClientCommandSender, methods: impl IntoIterator<Item = &'a MetaMethod>) -> bool {
-
-    let shv_path = request.shv_path().unwrap_or_default();
-    let check_request_access = || {
-        let method = request.method().unwrap_or_default();
-        let Some(mm) = methods.into_iter().find(|mm| mm.name == method) else {
-            let path = full_shv_path(mount_path, request.shv_path().unwrap_or_default());
-            return Err(rpc_error_unknown_method_on_path(path, method))
-        };
-        check_request_access_for_method(request, mount_path, mm)
+fn check_request_access<'a, 'r>(
+    request: &'r RpcMessage,
+    mount_path: impl AsRef<str>,
+    methods: impl IntoIterator<Item = &'a MetaMethod>
+) -> Result<&'r str, RpcError> {
+    let method = request.method().unwrap_or_default();
+    let Some(mm) = methods.into_iter().find(|mm| mm.name == method) else {
+        let path = full_shv_path(mount_path.as_ref(), request.shv_path().unwrap_or_default());
+        return Err(rpc_error_unknown_method_on_path(path, method))
     };
-
-    let Err(err) = check_request_access() else {
-        return true;
-    };
-    let mut resp = request.prepare_response()
-        .expect("should be able to prepare response");
-    debug!("Check request access on path `{mount_path}` / `{shv_path}`, error: {err}");
-    resp.set_error(err);
-    let _ = client_cmd_tx.send_message(resp);
-    false
+    check_request_access_for_method(request, mount_path, mm).map(|_| method)
 }
 
 pub fn send_response(request: &RpcMessage, client_cmd_tx: &ClientCommandSender, result: Result<RpcValue, RpcError>) {
@@ -403,13 +435,12 @@ pub fn send_response(request: &RpcMessage, client_cmd_tx: &ClientCommandSender, 
     }
 }
 
-pub fn default_ls(rq_param: Option<&RpcValue>) -> RpcValue {
+pub fn builtin_ls(rq_param: Option<&RpcValue>) -> RpcValue {
     match LsParam::from(rq_param) {
         LsParam::List => rpcvalue::List::new().into(),
         LsParam::Exists(_path) => false.into(),
     }
 }
-
 
 pub const METH_DIR: &str = "dir";
 pub const METH_LS: &str = "ls";
@@ -486,23 +517,171 @@ pub const PROPERTY_METHODS: &[MetaMethod] = &[
 
 #[cfg(test)]
 mod tests {
+    use shvrpc::rpcdiscovery::{DirResult, MethodInfo};
+
     use super::*;
-    // #[test]
-    // fn process_request_static_node() {
-    //     let node = crate::static_node!{
-    //         TestStaticNode(request, _tx) {
-    //             "echo" [IsGetter, Browse, "", ""] (param: i32) => {
-    //                 Some(Ok(param.into()))
-    //             }
-    //         }
-    //     };
-    //
-    //     let methods = node.methods();
-    //     assert_eq!(methods.len(), 3, "Expected 3 methods");
-    //     assert_eq!(methods[0].name, "dir");
-    //     assert_eq!(methods[1].name, "ls");
-    //     assert_eq!(methods[2].name, "echo");
-    // }
+    #[test]
+    fn process_request_static_node() {
+        let node = crate::static_node!{
+            TestStaticNode(request, _tx) {
+                "echo" [IsGetter, Read, "Int", "Int"] (param: i32) => {
+                    Some(Ok(param.into()))
+                }
+                "unhandled" [IsGetter | IsSetter, Write, "", ""]  => {
+                    None
+                }
+            }
+        };
+
+        let methods = node.methods();
+        assert_eq!(methods.len(), 2, "Expected 2 methods");
+
+        use shvrpc::metamethod::{Flag, AccessLevel};
+
+        let method_echo = &methods[0];
+        assert_eq!(method_echo.name, "echo");
+        assert_eq!(method_echo.flags, Flag::IsGetter as u32);
+        assert_eq!(method_echo.access, AccessLevel::Read);
+        assert_eq!(method_echo.param, "Int");
+        assert_eq!(method_echo.result, "Int");
+
+        let method_unhandled = &methods[1];
+        assert_eq!(method_unhandled.name, "unhandled");
+        assert_eq!(method_unhandled.flags, Flag::IsGetter as u32 | Flag::IsSetter as u32);
+        assert_eq!(method_unhandled.access, AccessLevel::Write);
+        assert_eq!(method_unhandled.param, "");
+        assert_eq!(method_unhandled.result, "");
+
+        crate::runtime::block_on(async move {
+            let node_handler = StaticNodeHandler(Arc::new(node));
+            let (ccs, _ccr) = futures::channel::mpsc::unbounded();
+            let ccs = ClientCommandSender::from_raw(ccs);
+
+            let make_request = |shvpath, method, param, access_level| {
+                let mut rq = RpcMessage::new_request(shvpath, method, param);
+                rq.set_access_level(access_level);
+                rq
+            };
+
+            // echo: Invalid path
+            let res = node_handler.process_request(
+                &make_request(
+                    "subpath",
+                    "echo",
+                    Some(32.into()),
+                    AccessLevel::Read,
+                ),
+                "mount/path",
+                &ccs,
+            ).await;
+            let res = res.unwrap_or_else(|| panic!("Result should be Some"));
+            assert!(res.is_err_and(|err| err.code == RpcErrorCode::MethodNotFound.into()));
+
+            // echo: Insufficient permission / method not found
+            let res = node_handler.process_request(
+                &make_request(
+                    "",
+                    "echo",
+                    Some("blah".into()),
+                    AccessLevel::Browse,
+                ),
+                "",
+                &ccs,
+            ).await;
+            let res = res.unwrap_or_else(|| panic!("Result should be Some"));
+            let Err(err) = res else {
+                panic!("Result should be an error");
+            };
+            assert_eq!(err.code, RpcErrorCode::MethodNotFound.into());
+
+            // echo: Invalid param
+            let res = node_handler.process_request(
+                &make_request(
+                    "",
+                    "echo",
+                    Some("blah".into()),
+                    AccessLevel::Read,
+                ),
+                "",
+                &ccs,
+            ).await;
+            let res = res.unwrap_or_else(|| panic!("Result should be Some"));
+            let Err(err) = res else {
+                panic!("Result should be an error");
+            };
+            assert_eq!(err.code, RpcErrorCode::InvalidParam.into());
+
+            // echo: Success
+            let res = node_handler.process_request(
+                &make_request(
+                    "",
+                    "echo",
+                    Some(42.into()),
+                    AccessLevel::Read,
+                ),
+                "",
+                &ccs,
+            ).await;
+            let res = res.unwrap_or_else(|| panic!("Result should be Some"));
+            assert!(res.is_ok_and(|val| val == 42.into()));
+
+            // dir (exists)
+            let res = node_handler.process_request(
+                &make_request(
+                    "",
+                    "dir",
+                    Some("echo".into()),
+                    AccessLevel::Browse,
+                ),
+                "",
+                &ccs,
+            ).await;
+            let res: bool = res
+                .unwrap_or_else(|| panic!("Result should be Some"))
+                .map_or_else(|_| panic!("Result should be Ok"), DirResult::try_from)
+                .unwrap_or_else(|_| panic!("Result should be a DirResult"))
+                .try_into()
+                .unwrap_or_else(|_| panic!("Result should be a bool"));
+            assert!(res);
+
+            // dir (list)
+            let res = node_handler.process_request(
+                &make_request(
+                    "",
+                    "dir",
+                    None,
+                    AccessLevel::Browse,
+                ),
+                "",
+                &ccs,
+            ).await;
+            let res: Vec<MethodInfo> = res
+                .unwrap_or_else(|| panic!("Result should be Some"))
+                .map_or_else(|_| panic!("Result should be Ok"), DirResult::try_from)
+                .unwrap_or_else(|_| panic!("Result should be a DirResult"))
+                .try_into()
+                .unwrap_or_else(|_| panic!("Result should be a list of methods"));
+
+            assert_eq!(res.len(), 4);
+            assert_eq!(res[0].name, METH_DIR);
+            assert_eq!(res[1].name, METH_LS);
+            assert_eq!(res[2].name, "echo");
+            assert_eq!(res[3].name, "unhandled");
+
+            // unhandled method
+            let res = node_handler.process_request(
+                &make_request(
+                    "",
+                    "unhandled",
+                    None,
+                    AccessLevel::Config,
+                ),
+                "",
+                &ccs,
+            ).await;
+            assert!(res.is_none());
+        });
+    }
 
     #[test]
     fn longest_path_prefix() {
@@ -545,7 +724,7 @@ mod tests {
                 let RequestResult::Ok(resp) = res else {
                     panic!("Not a response");
                 };
-                dir(DIR_LS_METHODS, DirParam::Brief) == resp
+                builtin_dir(DIR_LS_METHODS, DirParam::Brief) == resp
             })
         );
         assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x", METH_DIR, None)).is_none());
@@ -588,7 +767,7 @@ mod tests {
                 let Ok(resp) = res else {
                     panic!("Not a response");
                 };
-                dir(DIR_LS_METHODS, DirParam::Brief) == resp
+                builtin_dir(DIR_LS_METHODS, DirParam::Brief) == resp
             })
         );
         assert!(
@@ -602,7 +781,7 @@ mod tests {
                 let Ok(resp) = res else {
                     panic!("Not a response");
                 };
-                dir(DIR_LS_METHODS, DirParam::Brief) == resp
+                builtin_dir(DIR_LS_METHODS, DirParam::Brief) == resp
             })
         );
         assert!(process_local_dir_ls(&mounts, &make_request_frame("foo/x/y", METH_DIR, None)).is_none());

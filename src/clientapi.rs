@@ -151,7 +151,7 @@ impl Clone for ClientCommandSender {
 }
 
 impl ClientCommandSender {
-    #[cfg(feature = "mocking")]
+    #[cfg(any(feature = "mocking", test))]
     pub fn from_raw(sender: Sender<ClientCommand>) -> Self {
         Self { sender }
     }
