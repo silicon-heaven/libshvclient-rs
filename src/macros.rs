@@ -46,14 +46,14 @@
 #[macro_export]
 macro_rules! static_node {
     (
-        $name:ident ( $request:ident , $client_cmd_tx:ident $(, $app_state:ident)? ) {
+        $name:ident ( $request:ident , $client_cmd_tx:ident ) {
             $(
                 $method:tt
                 [ $($flags:ident)|* , $access:ident , $methodparam:expr , $methodresult:expr ]
                 $(
                     { $( ($signame:expr, $sigval:expr) ),* $(,)? }
                 )?
-                $( ( $param:ident : $type:ty ) )?
+                $( ( $param:ident : $ptype:ty ) )?
                 => $body:block
             )+
         }
@@ -61,54 +61,19 @@ macro_rules! static_node {
         {
             pub struct $name;
 
-            #[async_trait::async_trait]
-            impl $crate::clientnode::StaticNode for $name {
-
-                fn methods(&self) -> &'static [$crate::clientnode::MetaMethod] {
-                    const METHODS: &[$crate::clientnode::MetaMethod] =
-                    &[
+            $crate::impl_static_node!(
+                $name ( &self, $request, $client_cmd_tx ) {
+                    $(
+                        $method
+                        [ $($flags)|* , $access, $methodparam, $methodresult ]
                         $(
-                            $crate::clientnode::MetaMethod::new_static(
-                                $method,
-                                0 $(| $crate::clientnode::Flag::$flags as u32 )*,
-                                $crate::clientnode::AccessLevel::$access,
-                                $methodparam,
-                                $methodresult,
-                                &[
-                                    $($(($signame, $sigval)),*)?
-                                ],
-                                "",
-                            )
-                        ),+
-                    ];
-                    METHODS
+                            { $( ($signame, $sigval) ),* }
+                        )?
+                        $( ( $param: $ptype) )?
+                        => $body
+                    )+
                 }
-
-                async fn process_request(
-                    &self,
-                    $request: $crate::shvrpc::rpcmessage::RpcMessage,
-                    $client_cmd_tx: $crate::ClientCommandSender
-                ) -> Option<$crate::clientnode::RequestResult>
-                {
-                    use $crate::shvrpc::RpcMessageMetaTags;
-
-                    match $request.method() {
-                        $(
-                            Some($method) => {
-                                $crate::method_handler!(
-                                    $( ($param : $type) )?
-                                    $method @ $request @ $body
-                                )
-                            }
-                        )+
-
-                            _ => Some(Err($crate::clientnode::RpcError::new(
-                                        $crate::clientnode::RpcErrorCode::MethodNotFound,
-                                        format!("Invalid method: {:?}", $request.method())
-                            ))),
-                    }
-                }
-            }
+            );
             $name
         }
     }
@@ -173,11 +138,7 @@ macro_rules! impl_static_node {
                         Some($method) => {
                             $crate::method_handler!(
                                 $( ($param : $ptype) )?
-                                $method @ $request @ {
-                                    // Inject `self` into user body
-                                    let $self_ident = $self_ident;
-                                    $body
-                                }
+                                $method @ $request @ $body
                             )
                         }
                     )+
@@ -202,9 +163,8 @@ macro_rules! method_handler {
                  Ok($param) => $body,
                  Err(err) => Some(Err($crate::clientnode::RpcError::new(
                                  $crate::clientnode::RpcErrorCode::InvalidParam,
-                                 format!("Wrong parameter for `{}`: {}",
-                                     $method,
-                                     err
+                                 format!("Wrong parameter for `{method}`: {err}",
+                                     method = $method
                                  ))))
             }
         }
