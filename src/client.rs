@@ -1414,7 +1414,7 @@ mod tests {
                 let mut request = RpcMessage::new_request("dynamic/async", "dir", None);
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
-                assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_list().len(), 5);
+                assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_list().len(), 4);
             }
 
             {

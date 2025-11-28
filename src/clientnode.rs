@@ -498,20 +498,9 @@ pub const META_METHOD_SET: MetaMethod = MetaMethod::new_static(
     "",
 );
 
-pub const META_METHOD_SIG_CHNG: MetaMethod = MetaMethod::new_static(
-    SIG_CHNG,
-    Flag::IsSignal as u32,
-    AccessLevel::Read,
-    "",
-    "",
-    &[],
-    "",
-);
-
 pub const PROPERTY_METHODS: &[MetaMethod] = &[
     META_METHOD_GET,
     META_METHOD_SET,
-    META_METHOD_SIG_CHNG,
 ];
 
 
