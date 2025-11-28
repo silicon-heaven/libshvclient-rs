@@ -1,15 +1,17 @@
+use std::borrow::Cow;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 
 use shvclient::appnodes::DotAppNode;
+use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use tokio::sync::RwLock;
 
 use clap::Parser;
 use futures::{select, FutureExt, StreamExt};
 use log::*;
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
-use shvrpc::RpcMessage;
-use shvclient::clientnode::SIG_CHNG;
+use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
+use shvclient::clientnode::{LsHandler, MethodHandler, MethodHandlerType, RequestHandlerResult, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use shvproto::{RpcValue, FromRpcValue, ToRpcValue};
@@ -153,11 +155,59 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     };
 
-    // async fn dyn_methods_getter(_path: String, _: ClientCommandSender, _: Option<AppState<State>>) -> Option<MetaMethods> {
-    //     Some(MetaMethods::from(&PROPERTY_METHODS))
-    // }
-    // async fn dyn_handler(_request: RpcMessage, _client_cmd_tx: ClientCommandSender) {
-    // }
+    async fn dyn_request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender, counter: Arc<RwLock<i32>>) -> RequestHandlerResult {
+        let make_err = || Err(RpcError::new(
+                RpcErrorCode::MethodNotFound,
+                format!("Unknown method '{:?}'", rq.method()))
+        );
+        if !rq.shv_path().is_none_or(str::is_empty) {
+            return make_err();
+        }
+        match rq.method() {
+            Some(shvclient::clientnode::METH_DIR) => {
+                Ok(ResolvedRequest {
+                    methods: Cow::Borrowed(PROPERTY_METHODS),
+                    handler: MethodHandlerType::Dir,
+                })
+            }
+            Some(shvclient::clientnode::METH_LS) => {
+                Ok(ResolvedRequest {
+                    methods: Cow::from(PROPERTY_METHODS),
+                    handler: MethodHandlerType::Ls(LsHandler::new(async |_,_| {
+                        Some(Ok(vec![]))
+                    })),
+                })
+            },
+            Some(shvclient::clientnode::METH_GET) => {
+                Ok(ResolvedRequest {
+                    methods: Cow::from(PROPERTY_METHODS),
+                    handler: MethodHandlerType::Method {
+                        name: METH_GET.into(),
+                        handler: MethodHandler::new(async move |_,_| {
+                            Some(Ok(*counter.read().await))
+                        }),
+                    },
+                })
+            },
+            Some(shvclient::clientnode::METH_SET) => {
+                Ok(ResolvedRequest {
+                    methods: Cow::from(PROPERTY_METHODS),
+                    handler: MethodHandlerType::Method {
+                        name: METH_SET.into(),
+                        handler: MethodHandler::new(async move |_,_| {
+                            let param: i32 = match rq.param().unwrap_or_default().try_into() {
+                                Ok(v) => v,
+                                Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
+                            };
+                            *counter.write().await = param;
+                            Some(Ok(true))
+                        }),
+                    },
+                })
+            },
+            _ => make_err(),
+        }
+    }
 
     let params_node = shvclient::static_node!{
         ParamsNode(request, _tx ) {
@@ -276,11 +326,14 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         .mount_static("", root_node)
         .mount_static("static", static_node)
         .mount_static("static/custom", CustomNode { foo: 1234.into() })
-        .mount_static("status/delayed", DelayNode { app_state: counter })
+        .mount_static("status/delayed", DelayNode { app_state: counter.clone() })
         .mount_static("status/params", params_node)
-        // .mount("status/dyn", ClientNode::dynamic(
-        //         MethodsGetter::new(dyn_methods_getter),
-        //         RequestHandler::stateless(dyn_handler)))
+        .mount_dynamic("status/dyn", move |rq, client_cmd_tx| {
+            let counter = counter.clone();
+            async move {
+                dyn_request_handler(rq, client_cmd_tx, counter).await
+            }
+        })
         .run_with_init(&client_config, app_tasks)
         .await
 }
