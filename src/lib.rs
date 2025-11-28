@@ -22,7 +22,7 @@ pub use client::{
     ClientEvent,
     ClientEventsReceiver,
 };
-pub use clientnode::RequestHandler;
+pub use clientnode::DynamicNodeHandler;
 pub use connection::ConnectionFailedKind;
 
 // Reexport for version compatibility
