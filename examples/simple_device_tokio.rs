@@ -1,4 +1,5 @@
 use std::sync::atomic::AtomicI32;
+use std::sync::Arc;
 
 use shvclient::appnodes::DotAppNode;
 use tokio::sync::RwLock;
@@ -9,7 +10,7 @@ use log::*;
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::RpcMessage;
 use shvclient::clientnode::SIG_CHNG;
-use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver, AppState};
+use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use shvproto::{RpcValue, FromRpcValue, ToRpcValue};
 use url::Url;
@@ -84,7 +85,7 @@ type State = RwLock<i32>;
 async fn emit_chng_task(
     client_cmd_tx: ClientCommandSender,
     client_evt_rx: ClientEventsReceiver,
-    app_state: AppState<State>,
+    app_state: Arc<State>,
 ) -> shvrpc::Result<()> {
     info!("signal task started");
     let mut client_evt_rx = client_evt_rx.fuse();
@@ -143,7 +144,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
 
     let client_config = load_client_config(cli_opts).expect("Invalid config");
 
-    let counter = AppState::new(RwLock::new(-10));
+    let counter = Arc::new(RwLock::new(-10));
 
     let app_tasks = {
         let counter = counter.clone();
@@ -199,7 +200,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
 
 
     struct DelayNode {
-        app_state: AppState<RwLock<i32>>,
+        app_state: Arc<RwLock<i32>>,
     }
     shvclient::impl_static_node!(
         DelayNode(&self, request, client_cmd_tx) {

@@ -12,17 +12,19 @@ pub mod appnodes;
 pub mod client;
 pub mod runtime;
 pub mod clientnode;
+pub mod clientapi;
 mod connection;
 mod macros;
 
-pub use client::{
-    AppState,
-    Client,
+pub use client::Client;
+
+pub use clientapi::{
     ClientCommandSender,
     ClientEvent,
     ClientEventsReceiver,
 };
-pub use clientnode::DynamicNodeHandler;
+
+pub use clientnode::{DynamicNodeHandler, StaticNodeHandler};
 pub use connection::ConnectionFailedKind;
 
 // Reexport for version compatibility

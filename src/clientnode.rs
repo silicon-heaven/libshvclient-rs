@@ -1,4 +1,4 @@
-use crate::client::ClientCommandSender;
+use crate::ClientCommandSender;
 use crate::runtime::spawn_task;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
