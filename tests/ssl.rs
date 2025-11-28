@@ -113,17 +113,9 @@ fn create_broker_config(cert: &str, key: &str) -> BrokerConfig {
     }
 }
 
-fn block_on<T>(future: impl Future<Output = T>) -> T {
-    #[cfg(feature = "tokio")]
-    { tokio::runtime::Runtime::new().unwrap().block_on(future) }
-
-    #[cfg(feature = "smol")]
-    { smol::block_on(future) }
-}
-
 #[test]
 fn ssl() {
-    block_on(async {
+    shvclient::runtime::block_on(async {
         simple_logger::SimpleLogger::new()
             .with_level(log::LevelFilter::Debug)
             .init()
