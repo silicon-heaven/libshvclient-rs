@@ -117,9 +117,6 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
     #[cfg(feature = "tokio")]
     { tokio::runtime::Runtime::new().unwrap().block_on(future) }
 
-    #[cfg(feature = "async_std")]
-    { async_std::task::block_on(future) }
-
     #[cfg(feature = "smol")]
     { smol::block_on(future) }
 }

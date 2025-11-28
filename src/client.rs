@@ -1504,9 +1504,6 @@ mod tests {
                     .unwrap()
                     .block_on(init_client(test_drv, custom_client));
 
-                #[cfg(feature = "async_std")]
-                ::async_std::task::block_on(init_client(test_drv, custom_client));
-
                 #[cfg(feature = "smol")]
                 ::smol::block_on(init_client(test_drv, custom_client));
             }

@@ -13,11 +13,6 @@ path = "examples/simple_device_tokio.rs"
 required-features = ["tokio"]
 
 [[example]]
-name = "simple_device_async_std"
-path = "examples/simple_device_async_std.rs"
-required-features = ["async_std"]
-
-[[example]]
 name = "simple_device_smol"
 path = "examples/simple_device_smol.rs"
 required-features = ["smol"]
@@ -45,7 +40,6 @@ url = "2.4.1"
 log = "0.4.20"
 duration-str = "0.17"
 async-broadcast = "0.7.1"
-async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 tokio = { version = "1.36.0", features = ["full"], optional = true }
 tokio-util = { version = "0.7.10", features = ["compat"], optional = true }
 smol = { version = "2.0.2", optional = true }
@@ -70,6 +64,5 @@ async-trait = "0.1.89"
 [features]
 default = []
 tokio = ["dep:tokio", "dep:tokio-util"]
-async_std = ["dep:async-std"]
 smol = ["dep:smol"]
 mocking = []
