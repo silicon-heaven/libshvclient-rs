@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use rcgen::{BasicConstraints, CertificateParams, DnType, DnValue, IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType, PKCS_ECDSA_P256_SHA256};
 use shvbroker::brokerimpl::{run_broker, BrokerImpl};
 use shvbroker::config::{BrokerConfig, Listen};
-use shvclient::client::{RpcCallDirExists, RpcCallDirList};
+use shvclient::clientapi::{RpcCallDirExists, RpcCallDirList};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use shvrpc::client::ClientConfig;
 use tempfile::TempDir;

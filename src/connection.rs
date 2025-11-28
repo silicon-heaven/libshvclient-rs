@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-pub use crate::client::Sender;
+pub use crate::clientapi::Sender;
 use duration_str::HumanFormat;
 use futures::{select, AsyncRead, AsyncWrite, FutureExt, StreamExt};
 use futures_rustls::pki_types::ServerName;
