@@ -53,9 +53,6 @@ async fn connect(address: &str, tls: &Option<(Arc<TlsConnector>, ServerName<'sta
         tokio::net::TcpStream::connect(address).await?
     );
 
-    #[cfg(feature = "async_std")]
-    let stream = async_std::net::TcpStream::connect(address).await?;
-
     #[cfg(feature = "smol")]
     let stream = smol::net::TcpStream::connect(address).await?;
 
