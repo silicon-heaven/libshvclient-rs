@@ -173,7 +173,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
             Some(shvclient::clientnode::METH_LS) => {
                 Ok(ResolvedRequest {
                     methods: Cow::from(PROPERTY_METHODS),
-                    handler: MethodHandlerType::Ls(LsHandler::new(async |_,_| {
+                    handler: MethodHandlerType::Ls(LsHandler::new(async || {
                         Some(Ok(vec![]))
                     })),
                 })
@@ -183,7 +183,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
                     methods: Cow::from(PROPERTY_METHODS),
                     handler: MethodHandlerType::Method {
                         name: METH_GET.into(),
-                        handler: MethodHandler::new(async move |_,_| {
+                        handler: MethodHandler::new(async move || {
                             Some(Ok(*counter.read().await))
                         }),
                     },
@@ -194,7 +194,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
                     methods: Cow::from(PROPERTY_METHODS),
                     handler: MethodHandlerType::Method {
                         name: METH_SET.into(),
-                        handler: MethodHandler::new(async move |_,_| {
+                        handler: MethodHandler::new(async move || {
                             let param: i32 = match rq.param().unwrap_or_default().try_into() {
                                 Ok(v) => v,
                                 Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),

@@ -1291,7 +1291,7 @@ mod tests {
                     Some(crate::clientnode::METH_LS) => {
                         Ok(ResolvedRequest {
                             methods: Cow::from(PROPERTY_METHODS),
-                            handler: MethodHandlerType::Ls(LsHandler::new(async |_,_| {
+                            handler: MethodHandlerType::Ls(LsHandler::new(async || {
                                 Some(Ok(vec!["ls".into()]))
                             })),
                         })
@@ -1301,7 +1301,7 @@ mod tests {
                             methods: Cow::from(PROPERTY_METHODS),
                             handler: MethodHandlerType::Method {
                                 name: METH_GET.into(),
-                                handler: MethodHandler::new(async |_,_| {
+                                handler: MethodHandler::new(async || {
                                     Some(Ok("get"))
                                 }),
                             },
@@ -1312,8 +1312,7 @@ mod tests {
                             methods: Cow::from(PROPERTY_METHODS),
                             handler: MethodHandlerType::Method {
                                 name: METH_SET.into(),
-                                handler: MethodHandler::new(async |_,_| {
-                                    // Some(Ok("set".into()))
+                                handler: MethodHandler::new(async || {
                                     Some(Ok("set"))
                                 }),
                             },
@@ -1339,7 +1338,7 @@ mod tests {
                     let MethodHandlerType::Method { handler: MethodHandler(handler), .. } = handler else {
                         unreachable!("dir and ls should be handled by the lib");
                     };
-                    handler(request, client_cmd_tx).await
+                    handler().await
                 }
             }
 
