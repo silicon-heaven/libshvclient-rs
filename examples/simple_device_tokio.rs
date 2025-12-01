@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 
@@ -11,7 +10,7 @@ use futures::{select, FutureExt, StreamExt};
 use log::*;
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
-use shvclient::clientnode::{LsHandler, MethodHandler, MethodHandlerType, RequestHandlerResult, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
+use shvclient::clientnode::{RequestHandlerResult, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use shvproto::{RpcValue, FromRpcValue, ToRpcValue};
@@ -165,45 +164,38 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
         match rq.method() {
             Some(shvclient::clientnode::METH_DIR) => {
-                Ok(ResolvedRequest {
-                    methods: Cow::Borrowed(PROPERTY_METHODS),
-                    handler: MethodHandlerType::Dir,
-                })
+                Ok(ResolvedRequest::dir(PROPERTY_METHODS))
             }
             Some(shvclient::clientnode::METH_LS) => {
-                Ok(ResolvedRequest {
-                    methods: Cow::from(PROPERTY_METHODS),
-                    handler: MethodHandlerType::Ls(LsHandler::new(async || {
+                Ok(ResolvedRequest::ls(
+                    PROPERTY_METHODS,
+                    async || {
                         Some(Ok(vec![]))
-                    })),
-                })
+                    }),
+                )
             },
             Some(shvclient::clientnode::METH_GET) => {
-                Ok(ResolvedRequest {
-                    methods: Cow::from(PROPERTY_METHODS),
-                    handler: MethodHandlerType::Method {
-                        name: METH_GET.into(),
-                        handler: MethodHandler::new(async move || {
+                Ok(ResolvedRequest::method(
+                        PROPERTY_METHODS,
+                        METH_GET,
+                        async move || {
                             Some(Ok(*counter.read().await))
-                        }),
-                    },
-                })
+                        }
+                ))
             },
             Some(shvclient::clientnode::METH_SET) => {
-                Ok(ResolvedRequest {
-                    methods: Cow::from(PROPERTY_METHODS),
-                    handler: MethodHandlerType::Method {
-                        name: METH_SET.into(),
-                        handler: MethodHandler::new(async move || {
-                            let param: i32 = match rq.param().unwrap_or_default().try_into() {
-                                Ok(v) => v,
-                                Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
-                            };
-                            *counter.write().await = param;
-                            Some(Ok(true))
-                        }),
-                    },
-                })
+                Ok(ResolvedRequest::method(
+                    PROPERTY_METHODS,
+                    METH_SET,
+                    async move || {
+                        let param: i32 = match rq.param().unwrap_or_default().try_into() {
+                            Ok(v) => v,
+                            Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
+                        };
+                        *counter.write().await = param;
+                        Some(Ok(true))
+                    }
+                ))
             },
             _ => make_err(),
         }
