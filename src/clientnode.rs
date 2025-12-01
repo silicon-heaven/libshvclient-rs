@@ -132,8 +132,8 @@ pub struct StaticNodeHandler(Arc<dyn StaticNode>);
 #[derive(Clone)]
 pub struct DynamicNodeHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Send + Sync>);
 
-pub struct MethodHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, MethodHandlerResult<RpcValue>> + Send>);
-pub struct LsHandler(pub(crate) Box<dyn FnOnce(RpcMessage, ClientCommandSender) -> BoxFuture<'static, LsHandlerResult> + Send>);
+pub struct MethodHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, MethodHandlerResult<RpcValue>> + Send>);
+pub struct LsHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, LsHandlerResult> + Send>);
 
 pub enum MethodHandlerType {
     Dir,
@@ -276,7 +276,7 @@ impl NodeHandler for DynamicNodeHandler {
                         if let Err(err) = check_request_access_for_method(request, mount_path, mm_ls) {
                             return Some(Err(err));
                         }
-                        ls_handler(request.clone(), client_cmd_tx.clone())
+                        ls_handler()
                             .await
                             .map(|ls_result|
                                 ls_result.and_then(|children|
@@ -284,7 +284,7 @@ impl NodeHandler for DynamicNodeHandler {
                                 )
                             )
                     },
-                    MethodHandlerType::Method { name, handler: MethodHandler(handler) } => {
+                    MethodHandlerType::Method { name, handler: MethodHandler(method_handler) } => {
                         let Some((_, mm)) = get_method(&methods, &name) else {
                             let err = rpc_error_unknown_method_on_path(
                                 full_shv_path(mount_path, request.shv_path().unwrap_or_default()),
@@ -295,7 +295,7 @@ impl NodeHandler for DynamicNodeHandler {
                         if let Err(err) = check_request_access_for_method(request, mount_path, mm) {
                             return Some(Err(err));
                         }
-                        handler(request.clone(), client_cmd_tx.clone()).await
+                        method_handler().await
                     }
                 }
             }
@@ -307,12 +307,12 @@ impl NodeHandler for DynamicNodeHandler {
 impl MethodHandler {
     pub fn new<F, Fut, T>(func: F) -> Self
     where
-        F: FnOnce(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
+        F: FnOnce() -> Fut + Sync + Send + 'static,
         Fut: Future<Output = MethodHandlerResult<T>> + Send + Sync + 'static,
         T: Into<RpcValue>,
     {
-        Self(Box::new(move |rq, tx| Box::pin(async move {
-            func(rq, tx).await.map(|res| res.map(|val| val.into()))
+        Self(Box::new(move || Box::pin(async move {
+            func().await.map(|res| res.map(|val| val.into()))
         })))
     }
 }
@@ -320,10 +320,10 @@ impl MethodHandler {
 impl LsHandler {
     pub fn new<F, Fut>(func: F) -> Self
     where
-        F: FnOnce(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
+        F: FnOnce() -> Fut + Sync + Send + 'static,
         Fut: Future<Output = LsHandlerResult> + Send + Sync + 'static
     {
-        Self(Box::new(move |rq, tx| Box::pin(func(rq, tx))))
+        Self(Box::new(move || Box::pin(func())))
     }
 }
 
