@@ -627,8 +627,7 @@ mod tests {
     use generics_alias::*;
 
     mod drivers {
-        use crate::clientnode::{LsHandler, MethodHandlerType, RequestResult, METH_GET, METH_SET};
-        use std::borrow::Cow;
+        use crate::clientnode::{MethodHandlerType, RequestResult, METH_GET, METH_SET};
 
         use super::*;
         use crate::appnodes::DotAppNode;
@@ -1283,40 +1282,27 @@ mod tests {
                 }
                 match rq.method() {
                     Some(crate::clientnode::METH_DIR) => {
-                        Ok(ResolvedRequest {
-                            methods: PROPERTY_METHODS.iter().map(|mm| MetaMethod { access: AccessLevel::Command, ..mm.clone() }).collect(),
-                            handler: MethodHandlerType::Dir,
-                        })
+                        Ok(ResolvedRequest::dir(PROPERTY_METHODS
+                            .iter()
+                            .map(|mm| MetaMethod { access: AccessLevel::Command, ..mm.clone() })
+                            .collect::<Vec<_>>()
+                            )
+                        )
                     }
                     Some(crate::clientnode::METH_LS) => {
-                        Ok(ResolvedRequest {
-                            methods: Cow::from(PROPERTY_METHODS),
-                            handler: MethodHandlerType::Ls(LsHandler::new(async || {
-                                Some(Ok(vec!["ls".into()]))
-                            })),
-                        })
+                        Ok(ResolvedRequest::ls(PROPERTY_METHODS, async || {
+                            Some(Ok(vec!["ls".into()]))
+                        }))
                     },
                     Some(crate::clientnode::METH_GET) => {
-                        Ok(ResolvedRequest {
-                            methods: Cow::from(PROPERTY_METHODS),
-                            handler: MethodHandlerType::Method {
-                                name: METH_GET.into(),
-                                handler: MethodHandler::new(async || {
-                                    Some(Ok("get"))
-                                }),
-                            },
-                        })
+                        Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_GET, async || {
+                            Some(Ok("get"))
+                        }))
                     },
                     Some(crate::clientnode::METH_SET) => {
-                        Ok(ResolvedRequest {
-                            methods: Cow::from(PROPERTY_METHODS),
-                            handler: MethodHandlerType::Method {
-                                name: METH_SET.into(),
-                                handler: MethodHandler::new(async || {
-                                    Some(Ok("set"))
-                                }),
-                            },
-                        })
+                        Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_SET, async || {
+                            Some(Ok("set"))
+                        }))
                     },
                     _ => make_err(),
                 }

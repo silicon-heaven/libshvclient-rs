@@ -149,6 +149,45 @@ pub struct ResolvedRequest {
     pub handler: MethodHandlerType,
 }
 
+impl ResolvedRequest {
+    pub fn dir(methods: impl Into<MetaMethods>) -> Self {
+        Self {
+            methods: methods.into(),
+            handler: MethodHandlerType::Dir,
+        }
+    }
+
+    pub fn ls<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
+    where
+        F: FnOnce() -> Fut + Sync + Send + 'static,
+        Fut: Future<Output = LsHandlerResult> + Send + Sync + 'static,
+    {
+        Self {
+            methods: methods.into(),
+            handler: MethodHandlerType::Ls(LsHandler::new(handler)),
+        }
+    }
+
+    pub fn method<F, Fut, T>(
+        methods: impl Into<MetaMethods>,
+        method_name: impl Into<Cow<'static, str>>,
+        method_handler: F,
+    ) -> ResolvedRequest
+    where
+        F: FnOnce() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = MethodHandlerResult<T>> + Send + Sync + 'static,
+        T: Into<RpcValue>,
+    {
+        Self {
+            methods: methods.into(),
+            handler: MethodHandlerType::Method {
+                name: method_name.into(),
+                handler: MethodHandler::new(method_handler),
+            }
+        }
+    }
+}
+
 pub type RequestHandlerResult = Result<ResolvedRequest, RpcError>;
 pub type MethodHandlerResult<T> = Option<Result<T, RpcError>>;
 pub type LsHandlerResult = MethodHandlerResult<Vec<String>>;

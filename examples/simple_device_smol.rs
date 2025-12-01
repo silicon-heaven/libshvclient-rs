@@ -1,6 +1,4 @@
-use std::borrow::Cow;
 use std::sync::Arc;
-
 use clap::Parser;
 use futures::{select, FutureExt};
 use futures_time::time::Duration;
@@ -9,7 +7,7 @@ use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
 use shvclient::appnodes::{DotAppNode, DotDeviceNode};
-use shvclient::clientnode::{LsHandler, MethodHandler, MethodHandlerType, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
+use shvclient::clientnode::{LsHandlerResult, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use smol::lock::RwLock;
@@ -199,47 +197,30 @@ fn main() -> shvrpc::Result<()> {
                     if !rq.shv_path().is_none_or(str::is_empty) {
                         return make_err();
                     }
+                    async fn ls_handler() -> LsHandlerResult {
+                        Some(Ok(vec![]))
+                    }
                     match rq.method() {
                         Some(shvclient::clientnode::METH_DIR) => {
-                            Ok(ResolvedRequest {
-                                methods: Cow::Borrowed(PROPERTY_METHODS),
-                                handler: MethodHandlerType::Dir,
-                            })
+                            Ok(ResolvedRequest::dir(PROPERTY_METHODS))
                         }
                         Some(shvclient::clientnode::METH_LS) => {
-                            Ok(ResolvedRequest {
-                                methods: Cow::from(PROPERTY_METHODS),
-                                handler: MethodHandlerType::Ls(LsHandler::new(async || {
-                                    Some(Ok(vec![]))
-                                })),
-                            })
+                            Ok(ResolvedRequest::ls(PROPERTY_METHODS, ls_handler))
                         },
                         Some(shvclient::clientnode::METH_GET) => {
-                            Ok(ResolvedRequest {
-                                methods: Cow::from(PROPERTY_METHODS),
-                                handler: MethodHandlerType::Method {
-                                    name: METH_GET.into(),
-                                    handler: MethodHandler::new(async move || {
-                                        Some(Ok(*counter.read().await))
-                                    }),
-                                },
-                            })
+                            Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_GET, async move || {
+                                Some(Ok(*counter.read().await))
+                            }))
                         },
                         Some(shvclient::clientnode::METH_SET) => {
-                            Ok(ResolvedRequest {
-                                methods: Cow::from(PROPERTY_METHODS),
-                                handler: MethodHandlerType::Method {
-                                    name: METH_SET.into(),
-                                    handler: MethodHandler::new(async move || {
-                                        let param: i32 = match rq.param().unwrap_or_default().try_into() {
-                                            Ok(v) => v,
-                                            Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
-                                        };
-                                        *counter.write().await = param;
-                                        Some(Ok(true))
-                                    }),
-                                },
-                            })
+                            Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_SET, async move || {
+                                let param: i32 = match rq.param().unwrap_or_default().try_into() {
+                                    Ok(v) => v,
+                                    Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
+                                };
+                                *counter.write().await = param;
+                                Some(Ok(true))
+                            }))
                         },
                         _ => make_err(),
                     }
