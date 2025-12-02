@@ -198,7 +198,7 @@ fn main() -> shvrpc::Result<()> {
                         return make_err();
                     }
                     async fn ls_handler() -> LsHandlerResult {
-                        Some(Ok(vec![]))
+                        Ok(vec![])
                     }
                     match rq.method() {
                         Some(shvclient::clientnode::METH_DIR) => {
@@ -209,11 +209,11 @@ fn main() -> shvrpc::Result<()> {
                         },
                         Some(shvclient::clientnode::METH_GET) => {
                             Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_GET, async move || {
-                                Some(Ok(*counter.read().await))
+                                Ok(*counter.read().await)
                             }))
                         },
                         Some(shvclient::clientnode::METH_SET) => {
-                            Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_SET, async move || {
+                            Ok(ResolvedRequest::method_opt(PROPERTY_METHODS, METH_SET, async move || {
                                 let param: i32 = match rq.param().unwrap_or_default().try_into() {
                                     Ok(v) => v,
                                     Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),

@@ -1290,17 +1290,17 @@ mod tests {
                         )
                     }
                     Some(crate::clientnode::METH_LS) => {
-                        Ok(ResolvedRequest::ls(PROPERTY_METHODS, async || {
+                        Ok(ResolvedRequest::ls_opt(PROPERTY_METHODS, async || {
                             Some(Ok(vec!["ls".into()]))
                         }))
                     },
                     Some(crate::clientnode::METH_GET) => {
                         Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_GET, async || {
-                            Some(Ok("get"))
+                            Ok("get")
                         }))
                     },
                     Some(crate::clientnode::METH_SET) => {
-                        Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_SET, async || {
+                        Ok(ResolvedRequest::method_opt(PROPERTY_METHODS, METH_SET, async || {
                             Some(Ok("set"))
                         }))
                     },

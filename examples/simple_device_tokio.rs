@@ -170,7 +170,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
                 Ok(ResolvedRequest::ls(
                     PROPERTY_METHODS,
                     async || {
-                        Some(Ok(vec![]))
+                        Ok(vec![])
                     }),
                 )
             },
@@ -179,12 +179,12 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
                         PROPERTY_METHODS,
                         METH_GET,
                         async move || {
-                            Some(Ok(*counter.read().await))
+                            Ok(*counter.read().await)
                         }
                 ))
             },
             Some(shvclient::clientnode::METH_SET) => {
-                Ok(ResolvedRequest::method(
+                Ok(ResolvedRequest::method_opt(
                     PROPERTY_METHODS,
                     METH_SET,
                     async move || {

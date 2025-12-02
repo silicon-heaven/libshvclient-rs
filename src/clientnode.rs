@@ -132,8 +132,8 @@ pub struct StaticNodeHandler(Arc<dyn StaticNode>);
 #[derive(Clone)]
 pub struct DynamicNodeHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Send + Sync>);
 
-pub struct MethodHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, MethodHandlerResult<RpcValue>> + Send>);
-pub struct LsHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, LsHandlerResult> + Send>);
+pub struct MethodHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, Option<MethodHandlerResult<RpcValue>>> + Send>);
+pub struct LsHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, Option<LsHandlerResult>> + Send>);
 
 pub enum MethodHandlerType {
     Dir,
@@ -157,10 +157,10 @@ impl ResolvedRequest {
         }
     }
 
-    pub fn ls<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
+    pub fn ls_opt<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
     where
         F: FnOnce() -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = LsHandlerResult> + Send + Sync + 'static,
+        Fut: Future<Output = Option<LsHandlerResult>> + Send + 'static,
     {
         Self {
             methods: methods.into(),
@@ -168,14 +168,25 @@ impl ResolvedRequest {
         }
     }
 
-    pub fn method<F, Fut, T>(
+    pub fn ls<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
+    where
+        F: FnOnce() -> Fut + Sync + Send + 'static,
+        Fut: Future<Output = LsHandlerResult> + Send + 'static,
+    {
+        Self {
+            methods: methods.into(),
+            handler: MethodHandlerType::Ls(LsHandler::new(async move || Some(handler().await))),
+        }
+    }
+
+    pub fn method_opt<F, Fut, T>(
         methods: impl Into<MetaMethods>,
         method_name: impl Into<Cow<'static, str>>,
         method_handler: F,
     ) -> ResolvedRequest
     where
         F: FnOnce() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = MethodHandlerResult<T>> + Send + Sync + 'static,
+        Fut: Future<Output = Option<MethodHandlerResult<T>>> + Send + 'static,
         T: Into<RpcValue>,
     {
         Self {
@@ -186,10 +197,29 @@ impl ResolvedRequest {
             }
         }
     }
+
+    pub fn method<F, Fut, T>(
+        methods: impl Into<MetaMethods>,
+        method_name: impl Into<Cow<'static, str>>,
+        method_handler: F,
+    ) -> ResolvedRequest
+    where
+        F: FnOnce() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = MethodHandlerResult<T>> + Send + 'static,
+        T: Into<RpcValue>,
+    {
+        Self {
+            methods: methods.into(),
+            handler: MethodHandlerType::Method {
+                name: method_name.into(),
+                handler: MethodHandler::new(async move || Some(method_handler().await)),
+            }
+        }
+    }
 }
 
 pub type RequestHandlerResult = Result<ResolvedRequest, RpcError>;
-pub type MethodHandlerResult<T> = Option<Result<T, RpcError>>;
+pub type MethodHandlerResult<T> = Result<T, RpcError>;
 pub type LsHandlerResult = MethodHandlerResult<Vec<String>>;
 
 pub type MetaMethods = Cow<'static, [MetaMethod]>;
@@ -347,7 +377,7 @@ impl MethodHandler {
     pub fn new<F, Fut, T>(func: F) -> Self
     where
         F: FnOnce() -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = MethodHandlerResult<T>> + Send + Sync + 'static,
+        Fut: Future<Output = Option<MethodHandlerResult<T>>> + Send + 'static,
         T: Into<RpcValue>,
     {
         Self(Box::new(move || Box::pin(async move {
@@ -360,7 +390,7 @@ impl LsHandler {
     pub fn new<F, Fut>(func: F) -> Self
     where
         F: FnOnce() -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = LsHandlerResult> + Send + Sync + 'static
+        Fut: Future<Output = Option<LsHandlerResult>> + Send + 'static
     {
         Self(Box::new(move || Box::pin(func())))
     }
