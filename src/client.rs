@@ -201,7 +201,7 @@ impl Client<Full> {
     pub fn mount_dynamic<F, Fut>(mut self, path: impl Into<String>, handler: F) -> Self
     where
         F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
-        Fut: Future<Output = RequestHandlerResult> + Send + Sync + 'static
+        Fut: Future<Output = RequestHandlerResult> + Send + 'static
     {
         self.mounts.insert(path.into(), ClientNode::new_dynamic(handler));
         self

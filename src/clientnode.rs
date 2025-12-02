@@ -159,7 +159,7 @@ impl ResolvedRequest {
 
     pub fn ls_opt<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
     where
-        F: FnOnce() -> Fut + Sync + Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Option<LsHandlerResult>> + Send + 'static,
     {
         Self {
@@ -170,7 +170,7 @@ impl ResolvedRequest {
 
     pub fn ls<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
     where
-        F: FnOnce() -> Fut + Sync + Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = LsHandlerResult> + Send + 'static,
     {
         Self {
@@ -185,7 +185,7 @@ impl ResolvedRequest {
         method_handler: F,
     ) -> ResolvedRequest
     where
-        F: FnOnce() -> Fut + Send + Sync + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Option<MethodHandlerResult<T>>> + Send + 'static,
         T: Into<RpcValue>,
     {
@@ -204,7 +204,7 @@ impl ResolvedRequest {
         method_handler: F,
     ) -> ResolvedRequest
     where
-        F: FnOnce() -> Fut + Send + Sync + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = MethodHandlerResult<T>> + Send + 'static,
         T: Into<RpcValue>,
     {
@@ -376,7 +376,7 @@ impl NodeHandler for DynamicNodeHandler {
 impl MethodHandler {
     pub fn new<F, Fut, T>(func: F) -> Self
     where
-        F: FnOnce() -> Fut + Sync + Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Option<MethodHandlerResult<T>>> + Send + 'static,
         T: Into<RpcValue>,
     {
@@ -389,7 +389,7 @@ impl MethodHandler {
 impl LsHandler {
     pub fn new<F, Fut>(func: F) -> Self
     where
-        F: FnOnce() -> Fut + Sync + Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Option<LsHandlerResult>> + Send + 'static
     {
         Self(Box::new(move || Box::pin(func())))
