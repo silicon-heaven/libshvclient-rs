@@ -50,6 +50,9 @@ pub(crate) fn process_local_dir_ls<V>(
     mounts: &BTreeMap<String, V>,
     frame: &RpcFrame,
 ) -> Option<RequestResult> {
+    if frame.access_level().is_none() {
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, "Undefined access level")));
+    }
     let method = frame.method().unwrap_or_default();
     if !(method == METH_DIR || method == METH_LS) {
         return None;
@@ -132,93 +135,126 @@ pub struct StaticNodeHandler(Arc<dyn StaticNode>);
 #[derive(Clone)]
 pub struct DynamicNodeHandler(pub(crate) Arc<dyn Fn(RpcMessage, ClientCommandSender) -> BoxFuture<'static, RequestHandlerResult> + Send + Sync>);
 
-pub struct MethodHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, Option<MethodHandlerResult<RpcValue>>> + Send>);
-pub struct LsHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, Option<LsHandlerResult>> + Send>);
+pub(crate) struct MethodHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, Option<MethodHandlerResult<RpcValue>>> + Send>);
+pub(crate) struct LsHandler(pub(crate) Box<dyn FnOnce() -> BoxFuture<'static, Option<LsHandlerResult>> + Send>);
 
-pub enum MethodHandlerType {
+enum MethodHandlerType {
     Dir,
     Ls(LsHandler),
-    Method {
-        name: Cow<'static, str>,
-        handler: MethodHandler,
-    },
+    Method(MethodHandler),
 }
 
 pub struct ResolvedRequest {
-    pub methods: MetaMethods,
-    pub handler: MethodHandlerType,
+    methods: MetaMethods,
+    handler: MethodHandlerType,
 }
 
-impl ResolvedRequest {
-    pub fn dir(methods: impl Into<MetaMethods>) -> Self {
-        Self {
-            methods: methods.into(),
-            handler: MethodHandlerType::Dir,
+pub enum Method {
+    Dir(DirMethodResolver),
+    Ls(LsMethodResolver),
+    Other(MethodResolver),
+}
+
+impl Method {
+    pub fn from_request(request: &RpcMessage) -> Self {
+        match request.method().unwrap_or_default() {
+            METH_DIR => Method::Dir(DirMethodResolver(Priv)),
+            METH_LS => Method::Ls(LsMethodResolver(Priv)),
+            method => Method::Other(MethodResolver(method.into())),
         }
     }
+}
 
-    pub fn ls_opt<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
-    where
-        F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = Option<LsHandlerResult>> + Send + 'static,
-    {
-        Self {
+struct Priv;
+
+pub struct DirMethodResolver(Priv);
+pub struct LsMethodResolver(Priv);
+pub struct MethodResolver(String);
+
+impl DirMethodResolver {
+    pub fn resolve(&self, methods: impl Into<MetaMethods>) -> RequestHandlerResult {
+        Ok(ResolvedRequest {
             methods: methods.into(),
-            handler: MethodHandlerType::Ls(LsHandler::new(handler)),
-        }
+            handler: MethodHandlerType::Dir
+        })
     }
+}
 
-    pub fn ls<F, Fut>(methods: impl Into<MetaMethods>, handler: F) -> Self
+impl LsMethodResolver {
+    pub fn resolve<F, Fut>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = LsHandlerResult> + Send + 'static,
     {
-        Self {
+        Ok(ResolvedRequest {
             methods: methods.into(),
             handler: MethodHandlerType::Ls(LsHandler::new(async move || Some(handler().await))),
-        }
+        })
     }
 
-    pub fn method_opt<F, Fut, T>(
-        methods: impl Into<MetaMethods>,
-        method_name: impl Into<Cow<'static, str>>,
-        method_handler: F,
-    ) -> ResolvedRequest
+    pub fn resolve_opt<F, Fut>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = Option<MethodHandlerResult<T>>> + Send + 'static,
-        T: Into<RpcValue>,
+        Fut: Future<Output = Option<LsHandlerResult>> + Send + 'static,
     {
-        Self {
+        Ok(ResolvedRequest {
             methods: methods.into(),
-            handler: MethodHandlerType::Method {
-                name: method_name.into(),
-                handler: MethodHandler::new(method_handler),
-            }
-        }
+            handler: MethodHandlerType::Ls(LsHandler::new(handler)),
+        })
     }
+}
 
-    pub fn method<F, Fut, T>(
-        methods: impl Into<MetaMethods>,
-        method_name: impl Into<Cow<'static, str>>,
-        method_handler: F,
-    ) -> ResolvedRequest
+impl MethodResolver {
+    pub fn resolve<F, Fut, T>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = MethodHandlerResult<T>> + Send + 'static,
         T: Into<RpcValue>,
     {
-        Self {
+        Ok(ResolvedRequest {
             methods: methods.into(),
-            handler: MethodHandlerType::Method {
-                name: method_name.into(),
-                handler: MethodHandler::new(async move || Some(method_handler().await)),
-            }
+            handler: MethodHandlerType::Method(MethodHandler::new(async move || Some(handler().await))),
+        })
+    }
+
+    pub fn resolve_opt<F, Fut, T>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Option<MethodHandlerResult<T>>> + Send + 'static,
+        T: Into<RpcValue>,
+    {
+        Ok(ResolvedRequest {
+            methods: methods.into(),
+            handler: MethodHandlerType::Method(MethodHandler::new(handler)),
+        })
+    }
+
+    pub fn method(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+pub enum RequestHandlerError {
+    UnhandledMethodOnPath,
+}
+
+impl RequestHandlerError {
+    pub fn to_rpcerror(&self, rq: &RpcMessage) -> RpcError {
+        match self {
+            RequestHandlerError::UnhandledMethodOnPath =>
+                rpc_error_unknown_method_on_path(
+                    rq.shv_path().unwrap_or_default(),
+                    rq.method().unwrap_or_default()
+                ),
         }
     }
 }
 
-pub type RequestHandlerResult = Result<ResolvedRequest, RpcError>;
+pub fn err_unhandled_request() -> RequestHandlerResult {
+    Err(RequestHandlerError::UnhandledMethodOnPath)
+}
+
+pub type RequestHandlerResult = Result<ResolvedRequest, RequestHandlerError>;
 pub type MethodHandlerResult<T> = Result<T, RpcError>;
 pub type LsHandlerResult = MethodHandlerResult<Vec<String>>;
 
@@ -353,11 +389,12 @@ impl NodeHandler for DynamicNodeHandler {
                                 )
                             )
                     },
-                    MethodHandlerType::Method { name, handler: MethodHandler(method_handler) } => {
-                        let Some((_, mm)) = get_method(&methods, &name) else {
+                    MethodHandlerType::Method(MethodHandler(method_handler)) => {
+                        let method = request.method().unwrap_or_default();
+                        let Some((_, mm)) = get_method(&methods, method) else {
                             let err = rpc_error_unknown_method_on_path(
                                 full_shv_path(mount_path, request.shv_path().unwrap_or_default()),
-                                name
+                                method
                             );
                             return Some(Err(err));
                         };
@@ -368,7 +405,7 @@ impl NodeHandler for DynamicNodeHandler {
                     }
                 }
             }
-            Err(err) => Some(Err(err)),
+            Err(err) => Some(Err(err.to_rpcerror(request))),
         }
     }
 }
@@ -449,9 +486,7 @@ pub fn full_shv_path<'a>(mount_path: impl Into<Cow<'a, str>> + Display, shv_path
 }
 
 fn check_request_access_for_method(rq: &RpcMessage, mount_path: impl AsRef<str>, method: &MetaMethod) -> Result<(), RpcError> {
-    let Some(rq_level) = rq.access_level() else {
-        return Err(RpcError::new(RpcErrorCode::InvalidRequest, "Undefined access level"));
-    };
+    let rq_level = rq.access_level().unwrap_or_default();
     if rq_level >= method.access as i32 {
         Ok(())
     } else {
@@ -756,9 +791,9 @@ mod tests {
     }
 
     fn make_request_frame(path: &str, method: &str, param: Option<RpcValue>) -> RpcFrame {
-        RpcMessage::new_request(path, method, param)
-            .to_frame()
-            .unwrap()
+        let mut rq = RpcMessage::new_request(path, method, param);
+        rq.set_access_level(AccessLevel::Read);
+        rq.to_frame().unwrap()
     }
 
     #[test]

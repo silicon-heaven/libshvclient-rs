@@ -627,7 +627,7 @@ mod tests {
     use generics_alias::*;
 
     mod drivers {
-        use crate::clientnode::{MethodHandlerType, RequestResult, METH_GET, METH_SET};
+        use crate::clientnode::{err_unhandled_request, rpc_error_unknown_method_on_path, Method, RequestResult, METH_GET, METH_LS, METH_SET};
 
         use super::*;
         use crate::appnodes::DotAppNode;
@@ -635,7 +635,7 @@ mod tests {
         use futures_time::future::FutureExt;
         use futures_time::time::Duration;
         use shvproto::RpcValue;
-        use crate::clientnode::{MethodHandler, RequestHandlerResult, ResolvedRequest, PROPERTY_METHODS, SIG_CHNG};
+        use crate::clientnode::{RequestHandlerResult, PROPERTY_METHODS, SIG_CHNG};
         use shvrpc::metamethod::{AccessLevel, MetaMethod};
 
         struct ConnectionMock {
@@ -1273,38 +1273,39 @@ mod tests {
         //
         pub(super) fn make_client_with_handlers() -> Client<Full> {
             async fn request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender) -> RequestHandlerResult {
-                let make_err = || Err(RpcError::new(
-                        RpcErrorCode::MethodNotFound,
-                        format!("Unknown method '{:?}'", rq.method()))
-                );
-                if !rq.shv_path().is_none_or(str::is_empty) {
-                    return make_err();
+                let path = rq.shv_path().unwrap_or_default();
+                if !path.is_empty() {
+                    return err_unhandled_request();
                 }
-                match rq.method() {
-                    Some(crate::clientnode::METH_DIR) => {
-                        Ok(ResolvedRequest::dir(PROPERTY_METHODS
+
+                let method = Method::from_request(&rq);
+
+                match method {
+                    Method::Dir(dir) => {
+                        dir.resolve(PROPERTY_METHODS
                             .iter()
                             .map(|mm| MetaMethod { access: AccessLevel::Command, ..mm.clone() })
                             .collect::<Vec<_>>()
-                            )
                         )
                     }
-                    Some(crate::clientnode::METH_LS) => {
-                        Ok(ResolvedRequest::ls_opt(PROPERTY_METHODS, async || {
+                    Method::Ls(ls) => {
+                        ls.resolve_opt(PROPERTY_METHODS, async || {
                             Some(Ok(vec!["ls".into()]))
-                        }))
+                        })
                     },
-                    Some(crate::clientnode::METH_GET) => {
-                        Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_GET, async || {
+                    Method::Other(m) if m.method() == METH_GET => {
+                        m.resolve(PROPERTY_METHODS, async || {
                             Ok("get")
-                        }))
+                        })
                     },
-                    Some(crate::clientnode::METH_SET) => {
-                        Ok(ResolvedRequest::method_opt(PROPERTY_METHODS, METH_SET, async || {
+                    Method::Other(m) if m.method() == METH_SET => {
+                        m.resolve_opt(PROPERTY_METHODS, async || {
                             Some(Ok("set"))
-                        }))
+                        })
                     },
-                    _ => make_err(),
+                    Method::Other(_) => {
+                        err_unhandled_request()
+                    },
                 }
             }
 
@@ -1316,15 +1317,13 @@ mod tests {
                     PROPERTY_METHODS
                 }
 
-                async fn process_request(&self, request: RpcMessage, client_cmd_tx: ClientCommandSender) -> Option<RequestResult> {
-                    let ResolvedRequest { handler, .. } = match request_handler(request.clone(), client_cmd_tx.clone()).await {
-                        Ok(handler) => handler,
-                        Err(err) => return Some(Err(err)),
-                    };
-                    let MethodHandlerType::Method { handler: MethodHandler(handler), .. } = handler else {
-                        unreachable!("dir and ls should be handled by the lib");
-                    };
-                    handler().await
+                async fn process_request(&self, request: RpcMessage, _client_cmd_tx: ClientCommandSender) -> Option<RequestResult> {
+                    match request.method().unwrap_or_default() {
+                        METH_LS => Some(Ok(vec!["ls"].into())),
+                        METH_GET => Some(Ok("get".into())),
+                        METH_SET => Some(Ok("set".into())),
+                        method => Some(Err(rpc_error_unknown_method_on_path(request.shv_path().unwrap_or_default(), method))),
+                    }
                 }
             }
 
@@ -1350,22 +1349,26 @@ mod tests {
 
             {
                 // Nonexisting method or path
-                let request = RpcMessage::new_request("dynamic/a", "dir", None);
+                let mut request = RpcMessage::new_request("dynamic/a", "dir", None);
+                request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
-                let request = RpcMessage::new_request("dynamic/sync", "bar", None);
+                let mut request = RpcMessage::new_request("dynamic/sync", "bar", None);
+                request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
-                let request = RpcMessage::new_request("static/none", "dir", None);
+                let mut request = RpcMessage::new_request("static/none", "dir", None);
+                request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
-                let request = RpcMessage::new_request("static", "foo", None);
+                let mut request = RpcMessage::new_request("static", "foo", None);
+                request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());

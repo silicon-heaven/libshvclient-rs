@@ -7,7 +7,7 @@ use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
 use shvclient::appnodes::{DotAppNode, DotDeviceNode};
-use shvclient::clientnode::{LsHandlerResult, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
+use shvclient::clientnode::{err_unhandled_request, Method, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use smol::lock::RwLock;
@@ -190,39 +190,33 @@ fn main() -> shvrpc::Result<()> {
             .mount_dynamic("status/dyn", move |rq, _client_cmd_tx| {
                 let counter = counter.clone();
                 async move {
-                    let make_err = || Err(RpcError::new(
-                            RpcErrorCode::MethodNotFound,
-                            format!("Unknown method '{:?}'", rq.method()))
-                    );
-                    if !rq.shv_path().is_none_or(str::is_empty) {
-                        return make_err();
+                    let shv_path = rq.shv_path().unwrap_or_default();
+                    if shv_path.is_empty() {
+                        return err_unhandled_request();
                     }
-                    async fn ls_handler() -> LsHandlerResult {
-                        Ok(vec![])
-                    }
-                    match rq.method() {
-                        Some(shvclient::clientnode::METH_DIR) => {
-                            Ok(ResolvedRequest::dir(PROPERTY_METHODS))
+
+                    match Method::from_request(&rq) {
+                        Method::Dir(dir) => dir.resolve(PROPERTY_METHODS),
+                        Method::Ls(ls) => ls.resolve(PROPERTY_METHODS, async || {
+                            Ok(vec![])
+                        }),
+                        Method::Other(m) => {
+                            let method = m.method();
+                            match method {
+                                METH_GET => m.resolve(PROPERTY_METHODS, async move || {
+                                    Ok(*counter.read().await)
+                                }),
+                                METH_SET => m.resolve_opt(PROPERTY_METHODS, async move || {
+                                    let param: i32 = match rq.param().unwrap_or_default().try_into() {
+                                        Ok(v) => v,
+                                        Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
+                                    };
+                                    *counter.write().await = param;
+                                    Some(Ok(true))
+                                }),
+                                _ => err_unhandled_request(),
+                            }
                         }
-                        Some(shvclient::clientnode::METH_LS) => {
-                            Ok(ResolvedRequest::ls(PROPERTY_METHODS, ls_handler))
-                        },
-                        Some(shvclient::clientnode::METH_GET) => {
-                            Ok(ResolvedRequest::method(PROPERTY_METHODS, METH_GET, async move || {
-                                Ok(*counter.read().await)
-                            }))
-                        },
-                        Some(shvclient::clientnode::METH_SET) => {
-                            Ok(ResolvedRequest::method_opt(PROPERTY_METHODS, METH_SET, async move || {
-                                let param: i32 = match rq.param().unwrap_or_default().try_into() {
-                                    Ok(v) => v,
-                                    Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
-                                };
-                                *counter.write().await = param;
-                                Some(Ok(true))
-                            }))
-                        },
-                        _ => make_err(),
                     }
                 }
             })
