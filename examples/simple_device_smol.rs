@@ -7,7 +7,7 @@ use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
 use shvclient::appnodes::{DotAppNode, DotDeviceNode};
-use shvclient::clientnode::{err_unhandled_request, Method, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
+use shvclient::clientnode::{err_unresolved_request, Method, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use smol::lock::RwLock;
@@ -192,7 +192,7 @@ fn main() -> shvrpc::Result<()> {
                 async move {
                     let shv_path = rq.shv_path().unwrap_or_default();
                     if shv_path.is_empty() {
-                        return err_unhandled_request();
+                        return err_unresolved_request();
                     }
 
                     match Method::from_request(&rq) {
@@ -214,7 +214,7 @@ fn main() -> shvrpc::Result<()> {
                                     *counter.write().await = param;
                                     Some(Ok(true))
                                 }),
-                                _ => err_unhandled_request(),
+                                _ => err_unresolved_request(),
                             }
                         }
                     }

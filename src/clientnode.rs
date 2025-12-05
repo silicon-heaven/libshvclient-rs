@@ -234,27 +234,22 @@ impl MethodResolver {
     }
 }
 
-pub enum RequestHandlerError {
-    UnhandledMethodOnPath,
-}
+pub struct UnresolvedRequest;
 
-impl RequestHandlerError {
+impl UnresolvedRequest {
     pub fn to_rpcerror(&self, rq: &RpcMessage) -> RpcError {
-        match self {
-            RequestHandlerError::UnhandledMethodOnPath =>
-                rpc_error_unknown_method_on_path(
-                    rq.shv_path().unwrap_or_default(),
-                    rq.method().unwrap_or_default()
-                ),
-        }
+        rpc_error_unknown_method_on_path(
+            rq.shv_path().unwrap_or_default(),
+            rq.method().unwrap_or_default()
+        )
     }
 }
 
-pub fn err_unhandled_request() -> RequestHandlerResult {
-    Err(RequestHandlerError::UnhandledMethodOnPath)
+pub fn err_unresolved_request() -> RequestHandlerResult {
+    Err(UnresolvedRequest)
 }
 
-pub type RequestHandlerResult = Result<ResolvedRequest, RequestHandlerError>;
+pub type RequestHandlerResult = Result<ResolvedRequest, UnresolvedRequest>;
 pub type MethodHandlerResult<T> = Result<T, RpcError>;
 pub type LsHandlerResult = MethodHandlerResult<Vec<String>>;
 

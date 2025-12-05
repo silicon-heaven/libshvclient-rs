@@ -627,7 +627,7 @@ mod tests {
     use generics_alias::*;
 
     mod drivers {
-        use crate::clientnode::{err_unhandled_request, rpc_error_unknown_method_on_path, Method, RequestResult, METH_GET, METH_LS, METH_SET};
+        use crate::clientnode::{err_unresolved_request, rpc_error_unknown_method_on_path, Method, RequestResult, METH_GET, METH_LS, METH_SET};
 
         use super::*;
         use crate::appnodes::DotAppNode;
@@ -1275,7 +1275,7 @@ mod tests {
             async fn request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender) -> RequestHandlerResult {
                 let path = rq.shv_path().unwrap_or_default();
                 if !path.is_empty() {
-                    return err_unhandled_request();
+                    return err_unresolved_request();
                 }
 
                 let method = Method::from_request(&rq);
@@ -1304,7 +1304,7 @@ mod tests {
                         })
                     },
                     Method::Other(_) => {
-                        err_unhandled_request()
+                        err_unresolved_request()
                     },
                 }
             }
