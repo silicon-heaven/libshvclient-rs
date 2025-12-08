@@ -10,7 +10,7 @@ use futures::{select, FutureExt, StreamExt};
 use log::*;
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
-use shvclient::clientnode::{RequestHandlerResult, ResolvedRequest, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
+use shvclient::clientnode::{err_unresolved_request, Method, RequestHandlerResult, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use simple_logger::SimpleLogger;
 use shvproto::{RpcValue, FromRpcValue, ToRpcValue};
@@ -155,49 +155,34 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
     };
 
     async fn dyn_request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender, counter: Arc<RwLock<i32>>) -> RequestHandlerResult {
-        let make_err = || Err(RpcError::new(
-                RpcErrorCode::MethodNotFound,
-                format!("Unknown method '{:?}'", rq.method()))
-        );
-        if !rq.shv_path().is_none_or(str::is_empty) {
-            return make_err();
+        let shv_path = rq.shv_path().unwrap_or_default();
+
+        if shv_path.is_empty() {
+            return err_unresolved_request();
         }
-        match rq.method() {
-            Some(shvclient::clientnode::METH_DIR) => {
-                Ok(ResolvedRequest::dir(PROPERTY_METHODS))
-            }
-            Some(shvclient::clientnode::METH_LS) => {
-                Ok(ResolvedRequest::ls(
-                    PROPERTY_METHODS,
-                    async || {
-                        Ok(vec![])
+
+        match Method::from_request(&rq) {
+            Method::Dir(dir) => dir.resolve(PROPERTY_METHODS),
+            Method::Ls(ls) => ls.resolve(PROPERTY_METHODS, async || {
+                Ok(vec![])
+            }),
+            Method::Other(m) => {
+                let method = m.method();
+                match method {
+                    METH_GET => m.resolve(PROPERTY_METHODS, async move || {
+                        Ok(*counter.read().await)
                     }),
-                )
-            },
-            Some(shvclient::clientnode::METH_GET) => {
-                Ok(ResolvedRequest::method(
-                        PROPERTY_METHODS,
-                        METH_GET,
-                        async move || {
-                            Ok(*counter.read().await)
-                        }
-                ))
-            },
-            Some(shvclient::clientnode::METH_SET) => {
-                Ok(ResolvedRequest::method_opt(
-                    PROPERTY_METHODS,
-                    METH_SET,
-                    async move || {
+                    METH_SET => m.resolve_opt(PROPERTY_METHODS, async move || {
                         let param: i32 = match rq.param().unwrap_or_default().try_into() {
                             Ok(v) => v,
                             Err(err) => return Some(Err(RpcError::new(RpcErrorCode::InvalidParam, err))),
                         };
                         *counter.write().await = param;
                         Some(Ok(true))
-                    }
-                ))
-            },
-            _ => make_err(),
+                    }),
+                    _ => err_unresolved_request(),
+                }
+            }
         }
     }
 
