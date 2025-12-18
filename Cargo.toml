@@ -1,6 +1,6 @@
 [package]
 name = "shvclient"
-version = "0.21.2"
+version = "0.21.3"
 edition = "2024"
 
 [lib]
@@ -32,13 +32,13 @@ smol = "2.0.2"
 anyhow = "1.0.100"
 
 [dependencies]
-shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", tag = "3.6.22" }
-shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", tag = "7.0.0" }
+shvproto = { git = "https://github.com/silicon-heaven/libshvproto-rs", tag = "3.6.27" }
+shvrpc = { git = "https://github.com/silicon-heaven/libshvrpc-rs", tag = "7.1.3" }
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
 log = "0.4.20"
-duration-str = "0.17"
+duration-str = "0.18"
 async-broadcast = "0.7.1"
 tokio = { version = "1.36.0", features = ["full"], optional = true }
 tokio-util = { version = "0.7.10", features = ["compat"], optional = true }
