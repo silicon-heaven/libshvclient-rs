@@ -1,6 +1,9 @@
 [package]
 name = "shvclient"
-version = "0.21.5"
+description = "A Rust framework for Silicon Heaven RPC devices"
+license = "MIT"
+repository = "https://github.com/silicon-heaven/libshvclient-rs"
+version = "0.21.6"
 edition = "2024"
 
 [lib]
