@@ -121,7 +121,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - run: |
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Publish to crates.o
+        run: |
           cargo login <<< "${{secrets.CRATES_IO_TOKEN}}"
           # cargo publish does a verify-build, so we need to enable at least one of our features.
           # The feature doesn't actually alter what's being published.
