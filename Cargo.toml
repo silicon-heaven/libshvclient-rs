@@ -35,8 +35,8 @@ smol = "2.0.2"
 anyhow = "1.0.100"
 
 [dependencies]
-shvproto = { version = "3.6.27" }
-shvrpc = { version = "7.1.3" }
+shvproto = "3.6.27"
+shvrpc = "7.1.3"
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
