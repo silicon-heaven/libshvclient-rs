@@ -23,6 +23,4 @@ pub use clientapi::{
 pub use clientnode::{DynamicNodeHandler, StaticNodeHandler};
 pub use connection::ConnectionFailedKind;
 
-// Reexport for version compatibility
-pub use shvproto;
-pub use shvrpc;
+

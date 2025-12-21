@@ -105,14 +105,14 @@ macro_rules! impl_static_node {
         #[async_trait::async_trait]
         impl $crate::clientnode::StaticNode for $type {
 
-            fn methods(&self) -> &'static [$crate::clientnode::MetaMethod] {
-                const METHODS: &[$crate::clientnode::MetaMethod] =
+            fn methods(&self) -> &'static [shvrpc::metamethod::MetaMethod] {
+                const METHODS: &[shvrpc::metamethod::MetaMethod] =
                 &[
                     $(
-                        $crate::clientnode::MetaMethod::new_static(
+                        shvrpc::metamethod::MetaMethod::new_static(
                             $method,
-                            0 $(| $crate::clientnode::Flag::$flags as u32 )*,
-                            $crate::clientnode::AccessLevel::$access,
+                            0 $(| shvrpc::metamethod::Flag::$flags as u32 )*,
+                            shvrpc::metamethod::AccessLevel::$access,
                             $methodparam,
                             $methodresult,
                             &[
@@ -127,11 +127,11 @@ macro_rules! impl_static_node {
 
             async fn process_request(
                 &$self_ident,
-                $request: $crate::shvrpc::rpcmessage::RpcMessage,
+                $request: shvrpc::rpcmessage::RpcMessage,
                 $client_cmd_tx: $crate::ClientCommandSender,
             ) -> Option<$crate::clientnode::RequestResult>
             {
-                use $crate::shvrpc::RpcMessageMetaTags;
+                use shvrpc::RpcMessageMetaTags;
 
                 match $request.method() {
                     $(
@@ -143,8 +143,8 @@ macro_rules! impl_static_node {
                         }
                     )+
 
-                    _ => Some(Err($crate::clientnode::RpcError::new(
-                        $crate::clientnode::RpcErrorCode::MethodNotFound,
+                    _ => Some(Err(shvrpc::rpcmessage::RpcError::new(
+                        shvrpc::rpcmessage::RpcErrorCode::MethodNotFound,
                         format!("Invalid method: {:?}", $request.method())
                     ))),
                 }
@@ -161,8 +161,8 @@ macro_rules! method_handler {
 
              match <$type>::try_from(request_param) {
                  Ok($param) => $body,
-                 Err(err) => Some(Err($crate::clientnode::RpcError::new(
-                                 $crate::clientnode::RpcErrorCode::InvalidParam,
+                 Err(err) => Some(Err(shvrpc::rpcmessage::RpcError::new(
+                                 shvrpc::rpcmessage::RpcErrorCode::InvalidParam,
                                  format!("Wrong parameter for `{method}`: {err}",
                                      method = $method
                                  ))))
