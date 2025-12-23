@@ -33,6 +33,7 @@ rcgen = "0.14.5"
 tempfile = "3.23.0"
 smol = "2.0.2"
 anyhow = "1.0.100"
+lol = { path= "/home/vk/lol" }
 
 [dependencies]
 shvproto = "3.6.27"

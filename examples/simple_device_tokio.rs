@@ -1,5 +1,6 @@
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
+use lol::Foo;
 
 use shvclient::appnodes::DotAppNode;
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
@@ -133,6 +134,7 @@ struct CustomParam {
     data: Vec<String>,
     data2: Vec<RpcValue>,
 }
+
 
 #[tokio::main]
 pub(crate) async fn main() -> shvrpc::Result<()> {
@@ -276,7 +278,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
     shvclient::impl_static_node!(
         CustomNode(&self, request, _tx) {
             "secret" [IsGetter, Browse, "", ""] (param: i32) => {
-                println!("param: {param}, {method:?}", method = request.method());
+                println!("param: {param:?}, {method:?}", method = request.method());
                 Some(Ok(self.foo.fetch_add(1, std::sync::atomic::Ordering::SeqCst).into()))
             }
         }
@@ -284,8 +286,8 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
 
     let static_node = shvclient::static_node! {
         DeviceNode(request, _tx) {
-            "something" [IsGetter, Browse, "", ""] (param: i32) => {
-                println!("param: {param}, {method:?}", method = request.method());
+            "something" [IsGetter, Browse, "", ""] (param: Foo) => {
+                println!("param: {param:?}, {method:?}", method = request.method());
                 Some(Ok(RpcValue::from("name result")))
             }
             "get" [IsGetter, Browse, "", ""] => {
