@@ -6,6 +6,8 @@ updates:
       - /.github/actions/*
     schedule:
       interval: weekly
+      day: monday
+      time: 06:00
     groups:
       github-actions-deps:
         patterns:
@@ -14,6 +16,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: 06:00
     groups:
       cargo-deps:
         patterns:
