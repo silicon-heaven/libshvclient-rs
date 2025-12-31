@@ -273,13 +273,14 @@ impl<V: ClientVariant> Client<V> {
                 .await?
                 .iter()
                 .find_map(|node| match node.as_str() {
-                    "app" => Some(ShvApiVersion::V2),
-                    "client" => Some(ShvApiVersion::V3),
-                    _ => None,
-                })
+                        "client" => Some(ShvApiVersion::V3),
+                        "clients" => Some(ShvApiVersion::V2),
+                        _ => None,
+                    }
+                )
             .unwrap_or_else(|| {
-                warn!("Cannot detect SHV API version. Using version 2 as a fallback.");
-                ShvApiVersion::V2
+                warn!("Cannot detect SHV API version. Using version 3 as a fallback.");
+                ShvApiVersion::V3
             });
             Ok(api_version)
         }
@@ -713,7 +714,7 @@ mod tests {
             assert_eq!(req.shv_path(), Some(".broker"));
             assert_eq!(req.method(), Some("ls"));
             let resp = match api_version {
-                ShvApiVersion::V2 => vec![RpcValue::from("app")],
+                ShvApiVersion::V2 => vec![RpcValue::from("clients")],
                 ShvApiVersion::V3 => vec![RpcValue::from("client")],
             };
             conn_mock.emulate_receive_response(&req, resp);
