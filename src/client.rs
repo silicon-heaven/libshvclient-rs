@@ -714,7 +714,7 @@ mod tests {
             assert_eq!(req.shv_path(), Some(".broker"));
             assert_eq!(req.method(), Some("ls"));
             let resp = match api_version {
-                ShvApiVersion::V2 => vec![RpcValue::from("app")],
+                ShvApiVersion::V2 => vec![RpcValue::from("clients")],
                 ShvApiVersion::V3 => vec![RpcValue::from("client")],
             };
             conn_mock.emulate_receive_response(&req, resp);
