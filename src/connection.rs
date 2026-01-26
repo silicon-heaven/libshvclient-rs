@@ -71,7 +71,7 @@ pub enum ConnectionFailedKind {
     LoginFailed,
 }
 
-pub(crate) enum ConnectionEvent {
+pub enum ConnectionEvent {
     ConnectionFailed(ConnectionFailedKind),
     Connected(Sender<ConnectionCommand>),
     RpcFrameReceived(RpcFrame),
@@ -79,7 +79,7 @@ pub(crate) enum ConnectionEvent {
     Disconnected,
 }
 
-pub(crate) enum ConnectionCommand {
+pub enum ConnectionCommand {
     SendMessage(RpcMessage),
 }
 
