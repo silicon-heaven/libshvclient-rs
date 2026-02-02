@@ -10,6 +10,7 @@ use shvbroker::config::{BrokerConfig, Listen};
 use shvclient::clientapi::{RpcCallDirExists, RpcCallDirList};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use shvrpc::client::ClientConfig;
+use smol::channel::unbounded;
 use tempfile::TempDir;
 use url::Url;
 
@@ -18,8 +19,9 @@ const BROKER_ADDRESS: &str = "localhost:37568";
 async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     let access_config = broker_config.access.clone();
     let broker_config = Arc::new(broker_config);
+    let (sender, reciever) = unbounded();
     shvclient::runtime::spawn_task(async {
-        run_broker(BrokerImpl::new(broker_config, access_config, None))
+        run_broker(Arc::new(BrokerImpl::new(broker_config, access_config, sender, None)), reciever)
             .await
             .expect("broker accept_loop failed")
     }).detach();
