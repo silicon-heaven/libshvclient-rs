@@ -14,7 +14,7 @@ use std::fmt::Display;
 use std::format;
 use std::sync::Arc;
 // Reexport for use in the macros
-pub use shvrpc::metamethod::{AccessLevel, Flag, MetaMethod};
+pub use shvrpc::metamethod::{AccessLevel, Flags, MetaMethod};
 pub use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 pub use shvproto::{RpcValue, Value};
 
@@ -559,7 +559,7 @@ pub mod static_ref {
 
 pub const META_METHOD_DIR: MetaMethod = MetaMethod::new_static(
     METH_DIR,
-    Flag::None as u32,
+    Flags::None,
     AccessLevel::Browse,
     "DirParam",
     "DirResult",
@@ -569,7 +569,7 @@ pub const META_METHOD_DIR: MetaMethod = MetaMethod::new_static(
 
 pub const META_METHOD_LS: MetaMethod = MetaMethod::new_static(
     METH_LS,
-    Flag::None as u32,
+    Flags::None,
     AccessLevel::Browse,
     "LsParam",
     "LsResult",
@@ -579,7 +579,7 @@ pub const META_METHOD_LS: MetaMethod = MetaMethod::new_static(
 
 pub const META_METHOD_GET: MetaMethod = MetaMethod::new_static(
     METH_GET,
-    Flag::IsGetter as u32,
+    Flags::IsGetter,
     AccessLevel::Read,
     "",
     "",
@@ -589,7 +589,7 @@ pub const META_METHOD_GET: MetaMethod = MetaMethod::new_static(
 
 pub const META_METHOD_SET: MetaMethod = MetaMethod::new_static(
     METH_SET,
-    Flag::IsSetter as u32,
+    Flags::IsSetter,
     AccessLevel::Write,
     "",
     "",
@@ -624,18 +624,18 @@ mod tests {
         let methods = node.methods();
         assert_eq!(methods.len(), 2, "Expected 2 methods");
 
-        use shvrpc::metamethod::{Flag, AccessLevel};
+        use shvrpc::metamethod::{Flags, AccessLevel};
 
         let method_echo = &methods[0];
         assert_eq!(method_echo.name, "echo");
-        assert_eq!(method_echo.flags, Flag::IsGetter as u32);
+        assert_eq!(method_echo.flags, Flags::IsGetter);
         assert_eq!(method_echo.access, AccessLevel::Read);
         assert_eq!(method_echo.param, "Int");
         assert_eq!(method_echo.result, "Int");
 
         let method_unhandled = &methods[1];
         assert_eq!(method_unhandled.name, "unhandled");
-        assert_eq!(method_unhandled.flags, Flag::IsGetter as u32 | Flag::IsSetter as u32);
+        assert_eq!(method_unhandled.flags, Flags::IsGetter | Flags::IsSetter);
         assert_eq!(method_unhandled.access, AccessLevel::Write);
         assert_eq!(method_unhandled.param, "");
         assert_eq!(method_unhandled.result, "");
