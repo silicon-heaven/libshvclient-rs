@@ -2,7 +2,7 @@
 use crate::clientnode::{StaticNode, METH_PING};
 use crate::ClientCommandSender;
 use async_trait::async_trait;
-use shvrpc::metamethod::{AccessLevel, Flag, MetaMethod};
+use shvrpc::metamethod::{AccessLevel, Flags, MetaMethod};
 use shvrpc::rpcmessage::RpcErrorCode;
 use shvrpc::{RpcMessageMetaTags, RpcMessage, rpcmessage::RpcError};
 use shvproto::RpcValue;
@@ -19,7 +19,7 @@ const SHV_VERSION_MINOR: i32 = 0;
 pub const DOT_APP_METHODS: &[MetaMethod] = &[
     MetaMethod::new_static(
         METH_SHV_VERSION_MAJOR,
-        Flag::IsGetter as u32,
+        Flags::IsGetter,
         AccessLevel::Browse,
         "",
         "",
@@ -28,7 +28,7 @@ pub const DOT_APP_METHODS: &[MetaMethod] = &[
     ),
     MetaMethod::new_static(
         METH_SHV_VERSION_MINOR,
-        Flag::IsGetter as u32,
+        Flags::IsGetter,
         AccessLevel::Browse,
         "",
         "",
@@ -37,7 +37,7 @@ pub const DOT_APP_METHODS: &[MetaMethod] = &[
     ),
     MetaMethod::new_static(
         METH_NAME,
-        Flag::IsGetter as u32,
+        Flags::IsGetter,
         AccessLevel::Browse,
         "",
         "",
@@ -46,7 +46,7 @@ pub const DOT_APP_METHODS: &[MetaMethod] = &[
     ),
     MetaMethod::new_static(
         METH_PING,
-        Flag::None as u32,
+        Flags::None,
         AccessLevel::Browse,
         "",
         "",
@@ -95,7 +95,7 @@ impl StaticNode for DotAppNode {
 pub const DOT_DEVICE_METHODS: &[MetaMethod] = &[
     MetaMethod::new_static(
         METH_NAME,
-        Flag::IsGetter as u32,
+        Flags::IsGetter,
         AccessLevel::Browse,
         "",
         "",
@@ -104,7 +104,7 @@ pub const DOT_DEVICE_METHODS: &[MetaMethod] = &[
     ),
     MetaMethod::new_static(
         METH_VERSION,
-        Flag::IsGetter as u32,
+        Flags::IsGetter,
         AccessLevel::Browse,
         "",
         "",
@@ -113,7 +113,7 @@ pub const DOT_DEVICE_METHODS: &[MetaMethod] = &[
     ),
     MetaMethod::new_static(
         METH_SERIAL_NUMBER,
-        Flag::IsGetter as u32,
+        Flags::IsGetter,
         AccessLevel::Browse,
         "",
         "",

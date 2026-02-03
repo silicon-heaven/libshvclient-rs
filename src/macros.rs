@@ -111,7 +111,7 @@ macro_rules! impl_static_node {
                     $(
                         $crate::clientnode::MetaMethod::new_static(
                             $method,
-                            0 $(| $crate::clientnode::Flag::$flags as u32 )*,
+                            $crate::clientnode::Flags::from_bits_retain(0 $(| $crate::clientnode::Flags::$flags.bits() )* ),
                             $crate::clientnode::AccessLevel::$access,
                             $methodparam,
                             $methodresult,
