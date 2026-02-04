@@ -334,6 +334,9 @@ impl ClientCommandSender {
     }
 
     pub fn send_message(&self, message: RpcMessage) -> Result<(), futures::channel::mpsc::TrySendError<ClientCommand>> {
+        if self.sender.is_closed() {
+            return Ok(());
+        }
         self.sender.unbounded_send(ClientCommand::SendMessage { message })
     }
 
