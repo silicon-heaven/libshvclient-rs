@@ -255,7 +255,7 @@ impl ClientCommandSender {
         timeout: Option<Duration>,
     ) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
     where
-        R: for<'a> TryFrom<&'a RpcValue, Error = E>,
+        R: for<'a> TryFrom<&'a RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
         let path = path.as_ref();
@@ -269,6 +269,9 @@ impl ClientCommandSender {
         };
 
         use CallRpcMethodErrorKind::*;
+        if self.sender.is_closed() {
+            return Box::pin(futures::stream::empty());
+        }
         let call = self.do_rpc_call(path, method, param, timeout)
             .map_err(|err| {
                 warn!("Cannot send RPC request to the client core. \
@@ -311,7 +314,7 @@ impl ClientCommandSender {
         progress_notifier: Option<F>,
     ) -> Result<R, CallRpcMethodError>
     where
-        R: for<'a> TryFrom<&'a RpcValue, Error = E>,
+        R: for<'a> TryFrom<&'a RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
         F: Fn(f64) + Send,
     {
@@ -430,7 +433,7 @@ impl<'a> RpcCall<'a> {
 
     pub async fn exec<R, E>(self, client_cmd_sender: &ClientCommandSender) -> Result<R, CallRpcMethodError>
     where
-        R: for<'r> TryFrom<&'r RpcValue, Error = E>,
+        R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
         client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, None::<fn(_)>).await
@@ -438,7 +441,7 @@ impl<'a> RpcCall<'a> {
 
     pub async fn exec_with_progress<R, E>(self, client_cmd_sender: &ClientCommandSender, progress_notifier: impl Fn(f64) + Send + 'static) -> Result<R, CallRpcMethodError>
     where
-        R: for<'r> TryFrom<&'r RpcValue, Error = E>,
+        R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
         client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, Some(progress_notifier)).await
@@ -446,7 +449,7 @@ impl<'a> RpcCall<'a> {
 
     pub fn stream<T, R, E>(self, client_cmd_sender: &ClientCommandSender) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
     where
-        R: for<'r> TryFrom<&'r RpcValue, Error = E>,
+        R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
         client_cmd_sender.call_rpc_method_stream(self.path, self.method, self.param, self.timeout)
