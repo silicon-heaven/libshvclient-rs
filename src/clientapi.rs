@@ -67,6 +67,10 @@ impl futures::Stream for Subscriber {
 
 impl Drop for Subscriber {
     fn drop(&mut self) {
+        if self.client_cmd_tx.is_closed() {
+            return;
+        }
+
         if let Err(err) = self.client_cmd_tx.unbounded_send(
             ClientCommand::Unsubscribe { subscription_id: self.subscription_id, }) {
             warn!("Cannot unsubscribe `{}`: {err}", &self.ri);
