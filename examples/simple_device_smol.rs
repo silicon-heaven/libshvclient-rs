@@ -173,7 +173,6 @@ fn main() -> shvrpc::Result<()> {
         let counter = counter.clone();
         move |client_cmd_tx, client_evt_rx| {
             smol::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter)).detach();
-            async {}
         }
     };
 
