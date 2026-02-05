@@ -53,8 +53,7 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
                     .unwrap_or_else(|(commands_tx, _)| {
                         warn!("Client channels dropped before handed to the caller. Terminating the client");
                         commands_tx.terminate_client();
-                    });
-                async {}
+                    })
             })
             .await
             .unwrap_or_else(|e| error!("Client finished with error: {e}"));

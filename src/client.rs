@@ -210,7 +210,7 @@ impl Client<Full> {
     pub async fn run(mut self, config: &ClientConfig) -> shvrpc::Result<()> {
         self.run_with_init_opt(
             config,
-            Option::<fn(_, _) -> futures::future::Ready<()>>::None,
+            Option::<fn(_,_)>::None,
         )
         .await
     }
@@ -222,41 +222,33 @@ impl<V: ClientVariant> Client<V> {
         self
     }
 
-    async fn run_with_init_opt<H, D>(
+    async fn run_with_init_opt<H>(
         &mut self,
         config: &ClientConfig,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender, ClientEventsReceiver) -> D,
-        D: Future<Output = ()> + Send + 'static,
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
         let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
         spawn_connection_task(config, conn_evt_tx);
-        let mut client_awaitables = self.client_loop(conn_evt_rx, init_handler).await?;
-        if let Some(client_awaitables) = client_awaitables.take() {
-            client_awaitables.await;
-        };
-
-        Ok(())
+        self.client_loop(conn_evt_rx, init_handler).await
     }
 
-    pub async fn run_with_init<H, D>(mut self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
+    pub async fn run_with_init<H>(mut self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender, ClientEventsReceiver) -> D,
-        D: Future<Output = ()> + Send + 'static,
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
         self.run_with_init_opt(config, Some(handler)).await
     }
 
-    async fn client_loop<H, D>(
+    async fn client_loop<H>(
         &mut self,
         mut conn_events_rx: Receiver<ConnectionEvent>,
         init_handler: Option<H>,
-    ) -> shvrpc::Result<Option<D>>
+    ) -> shvrpc::Result<()>
     where
-        H: FnOnce(ClientCommandSender, ClientEventsReceiver) -> D,
-        D: Future<Output = ()> + Send + 'static,
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
         let mut rpc_call_timers = FuturesUnordered::new();
         let mut pending_rpc_calls: HashMap<i64, (Sender<RpcFrame>, UnboundedSender<()>)> = HashMap::new();
@@ -270,7 +262,9 @@ impl<V: ClientVariant> Client<V> {
         let client_events_receiver = ClientEventsReceiver(client_events_rx.clone());
         let mut conn_cmd_sender: Option<Sender<ConnectionCommand>> = None;
 
-        let client_awaitables = init_handler.map(|init_handler| init_handler(client_cmd_tx.clone(), client_events_receiver));
+        if let Some(init_handler) = init_handler {
+            init_handler(client_cmd_tx.clone(), client_events_receiver);
+        }
 
         async fn check_shv_api_version(client_cmd_tx: ClientCommandSender) -> Result<ShvApiVersion, CallRpcMethodError>
         {
@@ -418,7 +412,7 @@ impl<V: ClientVariant> Client<V> {
                             }
                             TerminateClient => {
                                 info!("TerminateClient command received, exiting client loop");
-                                return Ok(client_awaitables);
+                                return Ok(());
                             },
                         }
                         next_client_cmd = client_cmd_rx.next().fuse();
@@ -502,7 +496,7 @@ impl<V: ClientVariant> Client<V> {
                     }
                     None => {
                         info!("Connection task terminated, exiting client loop");
-                        return Ok(client_awaitables);
+                        return Ok(());
                     }
                 },
                 api_version_result = api_version_rx.next() => match api_version_result {
@@ -1480,7 +1474,6 @@ mod tests {
                 let init_handler = move |cli_cmd_tx, cli_evt_rx| {
                     let join_test_handle = crate::runtime::spawn_task(test_drv(conn_evt_tx, cli_cmd_tx, cli_evt_rx));
                     join_handle_tx.unbounded_send(join_test_handle).unwrap();
-                    async {}
                 };
                 client.client_loop(conn_evt_rx, Some(init_handler)).await.expect("Client loop terminated with an error");
                 let join_handle = join_handle_rx.next().await.expect("fetch test join handle");

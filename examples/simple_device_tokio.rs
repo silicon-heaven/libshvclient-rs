@@ -151,7 +151,6 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         let counter = counter.clone();
         move |client_cmd_tx, client_evt_rx| {
             tokio::task::spawn(emit_chng_task(client_cmd_tx, client_evt_rx, counter));
-            async {}
         }
     };
 
