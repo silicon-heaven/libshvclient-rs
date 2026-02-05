@@ -26,3 +26,8 @@ pub use connection::ConnectionFailedKind;
 // Reexport for version compatibility
 pub use shvproto;
 pub use shvrpc;
+
+#[cfg(feature = "mocking")]
+pub use connection::ConnectionEvent;
+#[cfg(feature = "mocking")]
+pub use connection::ConnectionCommand;

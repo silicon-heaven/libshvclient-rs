@@ -242,6 +242,30 @@ impl<V: ClientVariant> Client<V> {
         self.run_with_init_opt(config, Some(handler)).await
     }
 
+    #[cfg(feature = "mocking")]
+    async fn mock_run_with_init_opt<H>(
+        &mut self,
+        init_handler: Option<H>,
+        conn_evt_rx: futures::channel::mpsc::UnboundedReceiver::<ConnectionEvent>,
+    ) -> shvrpc::Result<()>
+    where
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
+    {
+        self.client_loop(conn_evt_rx, init_handler).await
+    }
+
+    #[cfg(feature = "mocking")]
+    pub async fn mock_run_with_init<H>(
+        mut self,
+        handler: H,
+        channel: futures::channel::mpsc::UnboundedReceiver::<ConnectionEvent>
+    ) -> shvrpc::Result<()>
+    where
+        H: FnOnce(ClientCommandSender, ClientEventsReceiver),
+    {
+        self.mock_run_with_init_opt(Some(handler), channel).await
+    }
+
     async fn client_loop<H>(
         &mut self,
         mut conn_events_rx: Receiver<ConnectionEvent>,
