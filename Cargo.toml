@@ -35,8 +35,8 @@ smol = "2.0.2"
 anyhow = "1.0.100"
 
 [dependencies]
-shvproto = "3.6.27"
-shvrpc = "10.0"
+shvproto = "6.0.1"
+shvrpc = "11.0"
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
