@@ -3,7 +3,7 @@ name = "shvclient"
 description = "A Rust framework for Silicon Heaven RPC devices"
 license = "MIT"
 repository = "https://github.com/silicon-heaven/libshvclient-rs"
-version = "0.26.0"
+version = "0.26.1"
 edition = "2024"
 
 [lib]
@@ -51,7 +51,7 @@ smol = { version = "2.0.2", optional = true }
 # there are called in expansion of `generics_inner` macro from generics-alias crate.
 macro_magic = "0.6.0"
 
-futures-rustls = "0.26.0"
+futures-rustls = "0.26.1"
 rustls-pemfile = "2.2.0"
 rustls-platform-verifier = "0.6.1"
 async-trait = "0.1.89"
