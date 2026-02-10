@@ -142,7 +142,7 @@ async fn emit_chng_task(
 
         }
         if emit_signal {
-            let sig = RpcMessage::new_signal("status/delayed", SIG_CHNG, Some(cnt.into()));
+            let sig = RpcMessage::new_signal("status/delayed", SIG_CHNG).with_param(cnt);
             client_cmd_tx.send_message(sig)?;
             info!("signal task emits a value: {cnt}");
             cnt += 1;

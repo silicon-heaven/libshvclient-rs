@@ -645,8 +645,11 @@ mod tests {
             let (ccs, _ccr) = futures::channel::mpsc::unbounded();
             let ccs = ClientCommandSender::from_raw(ccs);
 
-            let make_request = |shvpath, method, param, access_level| {
-                let mut rq = RpcMessage::new_request(shvpath, method, param);
+            let make_request = |shvpath, method, param: Option<RpcValue>, access_level| {
+                let mut rq = RpcMessage::new_request(shvpath, method);
+                if let Some(param) = param {
+                    rq.set_param(param);
+                }
                 rq.set_access_level(access_level);
                 rq
             };
@@ -786,7 +789,10 @@ mod tests {
     }
 
     fn make_request_frame(path: &str, method: &str, param: Option<RpcValue>) -> RpcFrame {
-        let mut rq = RpcMessage::new_request(path, method, param);
+        let mut rq = RpcMessage::new_request(path, method);
+        if let Some(param) = param {
+            rq.set_param(param);
+        }
         rq.set_access_level(AccessLevel::Read);
         rq.to_frame().unwrap()
     }

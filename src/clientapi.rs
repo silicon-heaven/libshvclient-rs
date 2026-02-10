@@ -176,7 +176,7 @@ impl ClientCommandSender {
     {
         let (response_sender, response_receiver) = futures::channel::mpsc::unbounded();
         self.sender.unbounded_send(ClientCommand::RpcCall {
-            request: RpcMessage::new_request(shvpath.as_ref(), method.as_ref(), param),
+            request: RpcMessage::new_request(shvpath, method).with_param(param),
             response_sender,
             timeout,
         })
