@@ -64,20 +64,20 @@ fn create_subscription_request(ri: &ShvRI, req_type: SubscriptionRequest, api_ve
         ShvApiVersion::V2 =>
             RpcMessage::new_request(
                 BROKER_APP_NODE,
-                method,
-                Some({
-                    let mut map = shvproto::Map::new();
-                    map.insert("signal".to_string(), ri.signal().map(|s| if s == "*" { "" } else { s }).into());
-                    map.insert("paths".to_string(),ri.path().into());
-                    map.into()
-                })
-            ),
+                method
+            )
+            .with_param({
+                let mut map = shvproto::Map::new();
+                map.insert("signal".to_string(), ri.signal().map(|s| if s == "*" { "" } else { s }).into());
+                map.insert("paths".to_string(),ri.path().into());
+                map
+            }),
         ShvApiVersion::V3 =>
             RpcMessage::new_request(
                 BROKER_CURRENT_CLIENT_NODE,
-                method,
-                Some(SubscriptionParam { ri: ri.clone(), ttl: None }.to_rpcvalue()),
-            ),
+                method
+            )
+            .with_param(SubscriptionParam { ri: ri.clone(), ttl: None }.to_rpcvalue()),
     }
 }
 
@@ -319,7 +319,7 @@ impl<V: ClientVariant> Client<V> {
                 timer_result = rpc_call_timers.select_next_some() => {
                     if let Some((req_id, duration)) = timer_result
                         && let Some((response_sender, _)) = pending_rpc_calls.remove(&req_id)
-                            && let Ok(mut response) = RpcMessage::new_request("", "", None).prepare_response()
+                            && let Ok(mut response) = RpcMessage::new_request("", "").prepare_response()
                                 && let Ok(err_frame) = response
                                     .set_error(RpcError::new(RpcErrorCode::MethodCallTimeout, format!("No response received within {duration} secs"))).to_frame() {
                                         response_sender.unbounded_send(err_frame).unwrap_or_default();
@@ -397,7 +397,7 @@ impl<V: ClientVariant> Client<V> {
                                             // There is already a subscription with the same RI.
                                             // Do not subscribe it twice, but send Ok response to
                                             // the caller.
-                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response()
+                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE).prepare_response()
                                                 && let Ok(frame) = response.set_result(()).to_frame() {
                                                     notifications_tx.unbounded_send(frame).unwrap_or_default();
                                                     if let Some(subscr) = subscriptions.0
@@ -409,7 +409,7 @@ impl<V: ClientVariant> Client<V> {
                                         }
                                         Err(err) => {
                                             // The subscription params are invalid. Send an error frame to the caller.
-                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response()
+                                            if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE).prepare_response()
                                                 && let Ok(err_frame) = response
                                                     .set_error(RpcError::new(RpcErrorCode::InvalidParam, err)).to_frame() {
                                                         notifications_tx.unbounded_send(err_frame).unwrap_or_default();
@@ -419,7 +419,7 @@ impl<V: ClientVariant> Client<V> {
                                 } else {
                                     // Subscribe called before the SHV API version has been
                                     // determined. Send an error frame to the caller.
-                                    if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE, None).prepare_response()
+                                    if let Ok(mut response) = RpcMessage::new_request("", METH_SUBSCRIBE).prepare_response()
                                         && let Ok(err_frame) = response
                                             .set_error(RpcError::new(RpcErrorCode::InternalError, "Unable to subscribe, because SHV API version is unknown.")).to_frame() {
                                                 notifications_tx.unbounded_send(err_frame).unwrap_or_default();
@@ -491,7 +491,7 @@ impl<V: ClientVariant> Client<V> {
                                         ShvApiVersion::V2 => ".broker/app",
                                         ShvApiVersion::V3 => ".app",
                                     };
-                                    let message = RpcMessage::new_request(broker_app_path, METH_PING, None);
+                                    let message = RpcMessage::new_request(broker_app_path, METH_PING);
                                     client_cmd_tx
                                         .send_message(message)
                                         .unwrap_or_else(|e|
@@ -702,8 +702,8 @@ mod tests {
                 self.conn_evt_tx.unbounded_send(ConnectionEvent::RpcFrameReceived(resp.to_frame().unwrap())).unwrap();
             }
 
-            fn emulate_receive_signal(&self, path: &str, sig_name: &str, param: Option<RpcValue>) {
-                let sig = RpcMessage::new_signal(path, sig_name, param);
+            fn emulate_receive_signal(&self, path: &str, sig_name: &str, param: impl Into<RpcValue>) {
+                let sig = RpcMessage::new_signal(path, sig_name).with_param(param);
                 self.conn_evt_tx.unbounded_send(ConnectionEvent::RpcFrameReceived(sig.to_frame().unwrap())).unwrap();
             }
 
@@ -769,10 +769,7 @@ mod tests {
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
 
-            cli_cmd_tx.send_message(RpcMessage::new_request(
-                    "path/test",
-                    "test_method",
-                    Some(42.into())))
+            cli_cmd_tx.send_message(RpcMessage::new_request("path/test", "test_method").with_param(42))
                 .expect("Client command send");
 
             let msg = conn_mock.expect_send_message().await;
@@ -790,10 +787,7 @@ mod tests {
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
 
-            cli_cmd_tx.send_message(RpcMessage::new_request(
-                    "path/test",
-                    "test_method",
-                    Some(42.into())))
+            cli_cmd_tx.send_message(RpcMessage::new_request("path/test", "test_method").with_param(42))
                 .expect("Client command send");
 
             let msg = conn_mock.expect_send_message().await;
@@ -949,10 +943,10 @@ mod tests {
                 // The subscription response
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(42.into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(43.into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 42);
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 43);
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "bar");
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "baz");
                 }
             ).detach();
 
@@ -1011,10 +1005,10 @@ mod tests {
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
                 // Path mismatch
-                conn_mock.emulate_receive_signal("path/to/resource2", SIG_CHNG, Some(42.into()));
-                conn_mock.emulate_receive_signal("path/to/res", SIG_CHNG, Some(42.into()));
+                conn_mock.emulate_receive_signal("path/to/resource2", SIG_CHNG, 42);
+                conn_mock.emulate_receive_signal("path/to/res", SIG_CHNG, 42);
                 // Signal mismatch
-                conn_mock.emulate_receive_signal("path/to/resource", "mntchng", Some(42.into()));
+                conn_mock.emulate_receive_signal("path/to/resource", "mntchng", 42);
 
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
@@ -1065,12 +1059,12 @@ mod tests {
 
             let mut conn_mock = rx.await.unwrap();
 
-            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(42.into()));
+            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 42);
             check_notification_received(&mut notify_rx_1, Some("path/to/resource"), Some(SIG_CHNG), Some(&42.into())).await;
             check_notification_received(&mut notify_rx_2, Some("path/to/resource"), Some(SIG_CHNG), Some(&42.into())).await;
 
             drop(notify_rx_1);
-            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
+            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "bar");
             check_notification_received(&mut notify_rx_2, Some("path/to/resource"), Some(SIG_CHNG), Some(&"bar".into())).await;
 
             drop(notify_rx_2);
@@ -1111,10 +1105,10 @@ mod tests {
                 // The subscription response
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(42.into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(43.into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 42);
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 43);
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "bar");
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "baz");
             }).detach();
 
             let mut notify_rx = cli_cmd_tx
@@ -1163,10 +1157,10 @@ mod tests {
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
                 // Path mismatch
-                conn_mock.emulate_receive_signal("path/to/resource2", SIG_CHNG, Some(42.into()));
-                conn_mock.emulate_receive_signal("path/to/res", SIG_CHNG, Some(42.into()));
+                conn_mock.emulate_receive_signal("path/to/resource2", SIG_CHNG, 42);
+                conn_mock.emulate_receive_signal("path/to/res", SIG_CHNG, 42);
                 // Signal mismatch
-                conn_mock.emulate_receive_signal("path/to/resource", "mntchng", Some(42.into()));
+                conn_mock.emulate_receive_signal("path/to/resource", "mntchng", 42);
 
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
@@ -1217,12 +1211,12 @@ mod tests {
 
             let mut conn_mock = rx.await.unwrap();
 
-            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(42.into()));
+            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 42);
             check_notification_received(&mut notify_rx_1, Some("path/to/resource"), Some(SIG_CHNG), Some(&42.into())).await;
             check_notification_received(&mut notify_rx_2, Some("path/to/resource"), Some(SIG_CHNG), Some(&42.into())).await;
 
             drop(notify_rx_1);
-            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
+            conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "bar");
             check_notification_received(&mut notify_rx_2, Some("path/to/resource"), Some(SIG_CHNG), Some(&"bar".into())).await;
 
             drop(notify_rx_2);
@@ -1264,15 +1258,15 @@ mod tests {
 
                 // These signals should be passed only to the first subscriber; the second is
                 // still waiting for the subscription response.
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(42.into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("bar".into()));
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 42);
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "bar");
 
                 // 2nd subscription response
                 conn_mock.emulate_receive_response(&subscr_req_2, ());
 
                 // These signals should be received by both subscribers.
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some(43.into()));
-                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, Some("baz".into()));
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, 43);
+                conn_mock.emulate_receive_signal("path/to/resource", SIG_CHNG, "baz");
             }).detach();
 
             let mut subscriber_1 = cli_cmd_tx
@@ -1374,25 +1368,25 @@ mod tests {
 
             {
                 // Nonexisting method or path
-                let mut request = RpcMessage::new_request("dynamic/a", "dir", None);
+                let mut request = RpcMessage::new_request("dynamic/a", "dir");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
-                let mut request = RpcMessage::new_request("dynamic/sync", "bar", None);
+                let mut request = RpcMessage::new_request("dynamic/sync", "bar");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
-                let mut request = RpcMessage::new_request("static/none", "dir", None);
+                let mut request = RpcMessage::new_request("static/none", "dir");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
-                let mut request = RpcMessage::new_request("static", "foo", None);
+                let mut request = RpcMessage::new_request("static", "foo");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
@@ -1401,7 +1395,7 @@ mod tests {
 
             {
                 // Access level is missing
-                let request = RpcMessage::new_request("dynamic/async", "dir", None);
+                let request = RpcMessage::new_request("dynamic/async", "dir");
                 let response = recv_request_get_response(&mut conn_mock, request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::InvalidRequest.into());
@@ -1409,22 +1403,22 @@ mod tests {
 
             {
                 // Requests to a valid method with sufficient permissions
-                let mut request = RpcMessage::new_request("static", "get", None);
+                let mut request = RpcMessage::new_request("static", "get");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_str(), "get");
 
-                let mut request = RpcMessage::new_request("dynamic/sync", "set", None);
+                let mut request = RpcMessage::new_request("dynamic/sync", "set");
                 request.set_access_level(AccessLevel::Service);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_str(), "set");
 
-                let mut request = RpcMessage::new_request("dynamic/async", "get", None);
+                let mut request = RpcMessage::new_request("dynamic/async", "get");
                 request.set_access_level(AccessLevel::Superuser);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_str(), "get");
 
-                let mut request = RpcMessage::new_request("dynamic/async", "dir", None);
+                let mut request = RpcMessage::new_request("dynamic/async", "dir");
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_list().len(), 4);
@@ -1432,17 +1426,17 @@ mod tests {
 
             {
                 // Insufficient permissions
-                let mut request = RpcMessage::new_request("static", "set", None);
+                let mut request = RpcMessage::new_request("static", "set");
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
 
-                let mut request = RpcMessage::new_request("dynamic/sync", "set", None);
+                let mut request = RpcMessage::new_request("dynamic/sync", "set");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
 
-                let mut request = RpcMessage::new_request("dynamic/async", "get", None);
+                let mut request = RpcMessage::new_request("dynamic/async", "get");
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, request).await;
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
