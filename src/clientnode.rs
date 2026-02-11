@@ -412,7 +412,7 @@ impl MethodHandler {
         T: Into<RpcValue>,
     {
         Self(Box::new(move || Box::pin(async move {
-            func().await.map(|res| res.map(|val| val.into()))
+            func().await.map(|res| res.map(Into::into))
         })))
     }
 }
