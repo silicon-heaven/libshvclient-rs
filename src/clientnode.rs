@@ -162,6 +162,7 @@ pub struct LsMethodResolver(Priv);
 pub struct MethodResolver(String);
 
 impl DirMethodResolver {
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve(&self, methods: impl Into<MetaMethods>) -> RequestHandlerResult {
         Ok(ResolvedRequest {
             methods: methods.into(),
@@ -171,6 +172,7 @@ impl DirMethodResolver {
 }
 
 impl LsMethodResolver {
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve<F, Fut>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -182,6 +184,7 @@ impl LsMethodResolver {
         })
     }
 
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve_opt<F, Fut>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -195,6 +198,7 @@ impl LsMethodResolver {
 }
 
 impl MethodResolver {
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve<F, Fut, T>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -207,6 +211,7 @@ impl MethodResolver {
         })
     }
 
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve_opt<F, Fut, T>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
