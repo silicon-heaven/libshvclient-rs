@@ -89,42 +89,39 @@ enum ConnectionLoopResult {
 }
 
 async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>) {
-    async {
-        let tls = if config.url.scheme() == "ssl" {
-            let tls_connector = Arc::new(build_tls_connector(&config.url)
-                .unwrap_or_else(|err| panic!("Cannot initialize TLS: {err}"))
-            );
-            let server_name = futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
-                .unwrap_or_else(|err| panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str()))
-                .to_owned();
-            Some((tls_connector, server_name))
-        } else {
-            None
-        };
+    let tls = if config.url.scheme() == "ssl" {
+        let tls_connector = Arc::new(build_tls_connector(&config.url)
+            .unwrap_or_else(|err| panic!("Cannot initialize TLS: {err}"))
+        );
+        let server_name = futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
+            .unwrap_or_else(|err| panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str()))
+            .to_owned();
+        Some((tls_connector, server_name))
+    } else {
+        None
+    };
 
-        if let Some(reconnect_interval) = &config.reconnect_interval {
-            info!("Reconnect interval set to: {reconnect_interval:?}");
-            loop {
-                // Check if the client loop has been terminated before trying to connect.
-                // The client loop termination is then detected in the connection_loop based on
-                // conn_event_receiver, but it happens only after a successful connection.
-                if conn_event_sender.is_closed() {
-                    warn!("conn_event_sender is closed");
-                    break;
-                }
-                match connection_loop(&config, &tls, &conn_event_sender).await {
-                    ConnectionLoopResult::ClientTerminated => break,
-                    ConnectionLoopResult::ConnectionClosed => {
-                        info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
-                        futures_time::task::sleep((*reconnect_interval).into()).await;
-                    }
+    if let Some(reconnect_interval) = &config.reconnect_interval {
+        info!("Reconnect interval set to: {reconnect_interval:?}");
+        loop {
+            // Check if the client loop has been terminated before trying to connect.
+            // The client loop termination is then detected in the connection_loop based on
+            // conn_event_receiver, but it happens only after a successful connection.
+            if conn_event_sender.is_closed() {
+                warn!("conn_event_sender is closed");
+                break;
+            }
+            match connection_loop(&config, &tls, &conn_event_sender).await {
+                ConnectionLoopResult::ClientTerminated => break,
+                ConnectionLoopResult::ConnectionClosed => {
+                    info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
+                    futures_time::task::sleep((*reconnect_interval).into()).await;
                 }
             }
-        } else {
-            connection_loop(&config, &tls, &conn_event_sender).await;
         }
+    } else {
+        connection_loop(&config, &tls, &conn_event_sender).await;
     }
-    .await;
     // NOTE: The connection_task termination is detected in the client_task
     // by conn_event_sender drop that occurs here.
 }
