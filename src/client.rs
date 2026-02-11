@@ -211,7 +211,7 @@ impl Client<Full> {
         self
     }
 
-    pub async fn run(mut self, config: &ClientConfig) -> shvrpc::Result<()> {
+    pub async fn run(self, config: &ClientConfig) -> shvrpc::Result<()> {
         self.run_with_init_opt(
             config,
             Option::<fn(_,_)>::None,
@@ -228,7 +228,7 @@ impl<V: ClientVariant> Client<V> {
     }
 
     async fn run_with_init_opt<H>(
-        &mut self,
+        &self,
         config: &ClientConfig,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
@@ -240,7 +240,7 @@ impl<V: ClientVariant> Client<V> {
         self.client_loop(conn_evt_rx, init_handler).await
     }
 
-    pub async fn run_with_init<H>(mut self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
+    pub async fn run_with_init<H>(self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
     where
         H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
@@ -272,7 +272,7 @@ impl<V: ClientVariant> Client<V> {
     }
 
     async fn client_loop<H>(
-        &mut self,
+        &self,
         mut conn_events_rx: Receiver<ConnectionEvent>,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
@@ -1489,7 +1489,7 @@ mod tests {
 
             #[generics(TestDriverBounds)]
             async fn init_client(test_drv: C, custom_client: Option<Client<Full>>) {
-                let mut client = custom_client.unwrap_or_else(|| Client::new().app(DotAppNode::new("test")));
+                let client = custom_client.unwrap_or_else(|| Client::new().app(DotAppNode::new("test")));
                 let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
                 let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
                 let init_handler = move |cli_cmd_tx, cli_evt_rx| {
