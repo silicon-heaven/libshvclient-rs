@@ -111,7 +111,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
                 warn!("conn_event_sender is closed");
                 break;
             }
-            match connection_loop(&config, &tls, &conn_event_sender).await {
+            match Box::pin(connection_loop(&config, &tls, &conn_event_sender)).await {
                 ConnectionLoopResult::ClientTerminated => break,
                 ConnectionLoopResult::ConnectionClosed => {
                     info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
@@ -120,7 +120,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
             }
         }
     } else {
-        connection_loop(&config, &tls, &conn_event_sender).await;
+        Box::pin(connection_loop(&config, &tls, &conn_event_sender)).await;
     }
     // NOTE: The connection_task termination is detected in the client_task
     // by conn_event_sender drop that occurs here.
