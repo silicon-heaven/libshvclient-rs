@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 
 use clap::Parser;
 use futures::{select, FutureExt, StreamExt};
-use log::*;
+use log::{info, error, LevelFilter};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
 use shvclient::clientnode::{err_unresolved_request, Method, RequestHandlerResult, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};

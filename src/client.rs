@@ -7,7 +7,7 @@ use futures::{select, FutureExt, StreamExt};
 use futures::channel::mpsc::UnboundedSender;
 use futures_time::task::sleep;
 use futures_time::time::Duration;
-use log::*;
+use log::{debug, warn, error, info};
 use shvrpc::client::ClientConfig;
 use shvrpc::rpc::{Glob, ShvRI, SubscriptionParam};
 use shvrpc::rpcframe::RpcFrame;
@@ -1503,7 +1503,7 @@ mod tests {
 
             #[generics(TestDriverBounds)]
             pub fn run_test(test_drv: C, custom_client: Option<Client<Full>>) {
-                let _ = simple_logger::init_with_level(Level::Debug);
+                let _ = simple_logger::init_with_level(log::Level::Debug);
 
                 #[cfg(feature = "tokio")]
                 ::tokio::runtime::Builder::new_multi_thread()

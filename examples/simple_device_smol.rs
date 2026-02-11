@@ -2,7 +2,7 @@ use std::sync::Arc;
 use clap::Parser;
 use futures::{select, FutureExt};
 use futures_time::time::Duration;
-use log::*;
+use log::{LevelFilter, error, info, warn};
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};

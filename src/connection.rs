@@ -5,7 +5,7 @@ use duration_str::HumanFormat;
 use futures::{select, AsyncRead, AsyncWrite, FutureExt, StreamExt};
 use futures_rustls::pki_types::ServerName;
 use futures_rustls::TlsConnector;
-use log::*;
+use log::{info, warn, debug};
 use rustls_platform_verifier::BuilderVerifierExt;
 pub use shvrpc::client::ClientConfig;
 use shvrpc::client::LoginParams;
