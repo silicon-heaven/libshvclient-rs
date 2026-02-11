@@ -465,7 +465,6 @@ impl<V: ClientVariant> Client<V> {
                                     &mut subscription_requests,
                                     &shv_api_version,
                                 )
-                                .await
                                 .unwrap_or_else(|e| error!("Cannot process an RPC frame: {e}"));
                             }
                         ConnectionFailed(kind) => {
@@ -547,7 +546,8 @@ impl<V: ClientVariant> Client<V> {
         }
     }
 
-    async fn process_rpc_frame(
+    #[expect(clippy::ref_option, reason = "Better ergonomics with the tuple")]
+    fn process_rpc_frame(
         &self,
         frame: RpcFrame,
         client_cmd_tx: &ClientCommandSender,
