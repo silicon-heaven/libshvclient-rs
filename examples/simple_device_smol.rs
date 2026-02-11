@@ -55,7 +55,7 @@ fn init_logger(cli_opts: &Opts) {
             }
         }
     }
-    logger.init().unwrap();
+    logger.init().expect("Logger must work");
 }
 
 fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {

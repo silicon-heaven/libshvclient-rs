@@ -33,7 +33,7 @@ where
 
 pub fn block_on<T>(future: impl Future<Output = T>) -> T {
     #[cfg(feature = "tokio")]
-    { tokio::runtime::Runtime::new().unwrap().block_on(future) }
+    { tokio::runtime::Runtime::new().expect("Runtime must work").block_on(future) }
 
     #[cfg(feature = "smol")]
     { smol::block_on(future) }

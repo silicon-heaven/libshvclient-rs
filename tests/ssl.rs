@@ -41,7 +41,7 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
     let ca_crt_path = ca_crt_path.into();
     shvclient::runtime::spawn_task(async move {
         let client_config = ClientConfig {
-            url: Url::parse(&format!("ssl://admin:admin@{BROKER_ADDRESS}?ca={ca_crt_path}")).unwrap(),
+            url: Url::parse(&format!("ssl://admin:admin@{BROKER_ADDRESS}?ca={ca_crt_path}")).expect("Url must be correct"),
             device_id: None,
             mount: None,
             heartbeat_interval: Duration::from_secs(60),
@@ -109,7 +109,7 @@ fn generate_test_cert_files() -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
 fn create_broker_config(cert: &str, key: &str) -> BrokerConfig {
     BrokerConfig {
         listen: vec![
-            Listen { url: Url::parse(&format!("ssl://{BROKER_ADDRESS}?cert={cert}&key={key}")).unwrap() },
+            Listen { url: Url::parse(&format!("ssl://{BROKER_ADDRESS}?cert={cert}&key={key}")).expect("Url must be correct") },
         ],
         ..Default::default()
     }
