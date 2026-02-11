@@ -179,24 +179,29 @@ impl Client<Full> {
         }
     }
 
+    #[must_use]
     pub fn app(self, app_node: crate::appnodes::DotAppNode) -> Self {
         self.mount(".app", ClientNode::new_static(app_node))
     }
 
+    #[must_use]
     pub fn device(self, device_node: crate::appnodes::DotDeviceNode) -> Self {
         self.mount(".device", ClientNode::new_static(device_node))
     }
 
+    #[must_use]
     pub fn mount(mut self, path: impl Into<String>, node: ClientNode) -> Self {
         self.mounts.insert(path.into(), node);
         self
     }
 
+    #[must_use]
     pub fn mount_static(mut self, path: impl Into<String>, node: impl StaticNode) -> Self {
         self.mounts.insert(path.into(), ClientNode::new_static(node));
         self
     }
 
+    #[must_use]
     pub fn mount_dynamic<F, Fut>(mut self, path: impl Into<String>, handler: F) -> Self
     where
         F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
@@ -216,6 +221,7 @@ impl Client<Full> {
 }
 
 impl<V: ClientVariant> Client<V> {
+    #[must_use]
     pub fn rpc_call_timeout(mut self, timeout: Duration) -> Self {
         self.rpc_call_timeout = timeout;
         self
