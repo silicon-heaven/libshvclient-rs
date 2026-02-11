@@ -355,9 +355,7 @@ impl<V: ClientVariant> Client<V> {
                                                     _ = sleep(timeout).fuse() => {
                                                         return Some((req_id, timeout.as_secs()))
                                                     }
-                                                    msg = timer_update_rx.next() => if msg.is_some() {
-                                                        continue
-                                                    } else {
+                                                    msg = timer_update_rx.next() => if msg.is_none() {
                                                         break
                                                     },
                                                 }

@@ -327,7 +327,6 @@ impl ClientCommandSender {
                     if let Some(progress_notify) = &progress_notifier {
                         progress_notify(progress);
                     }
-                    continue
                 }
                 RpcCallResponse::Success(result) => return Ok(result),
             }
