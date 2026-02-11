@@ -7,10 +7,14 @@ pub struct TaskHandle<F: futures::Future + Send + 'static>(
 );
 
 impl<F: futures::Future + Send + 'static> TaskHandle<F> {
+    #[cfg(feature = "tokio")]
+    #[expect(clippy::unused_async, reason = "We want the same API as with smol")]
     pub async fn cancel(self) {
-        #[cfg(feature = "tokio")]
         self.0.abort();
-        #[cfg(feature = "smol")]
+    }
+
+    #[cfg(feature = "smol")]
+    pub async fn cancel(self) {
         self.0.cancel().await;
     }
 
