@@ -66,7 +66,7 @@ fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
     let mut config = if let Some(config_file) = &cli_opts.config {
         ClientConfig::from_file_or_default(config_file, cli_opts.create_default_config)?
     } else {
-        Default::default()
+        ClientConfig::default()
     };
     config.url = match &cli_opts.url {
         Some(url_str) => Url::parse(url_str)?,

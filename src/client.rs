@@ -83,7 +83,7 @@ fn create_subscription_request(ri: &ShvRI, req_type: SubscriptionRequest, api_ve
 
 impl Subscriptions {
     fn new() -> Self {
-        Default::default()
+        Self::default()
     }
 
     fn clear(&mut self) {
@@ -158,7 +158,7 @@ const RPC_CALL_DEFAULT_TIMEOUT_SECS: u64 = 10;
 impl Client<Plain> {
     pub fn new_plain() -> Self {
         Self {
-            mounts: Default::default(),
+            mounts: BTreeMap::default(),
             rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
@@ -174,7 +174,7 @@ impl Default for Client<Full> {
 impl Client<Full> {
     pub fn new() -> Self {
         Self {
-            mounts: Default::default(),
+            mounts: BTreeMap::default(),
             rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
