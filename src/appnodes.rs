@@ -148,10 +148,7 @@ impl StaticNode for DotDeviceNode {
         Some(match request.method() {
             Some(METH_NAME) => Ok(RpcValue::from(&self.device_name)),
             Some(METH_VERSION) => Ok(RpcValue::from(&self.version)),
-            Some(METH_SERIAL_NUMBER) => match &self.serial_number {
-                None => Ok(RpcValue::null()),
-                Some(sn) => Ok(RpcValue::from(sn)),
-            },
+            Some(METH_SERIAL_NUMBER) => Ok(self.serial_number.as_ref().map_or_else(RpcValue::null, RpcValue::from)),
             _ => Err(err_method_not_found()),
         })
     }

@@ -60,10 +60,7 @@ pub(crate) fn process_local_dir_ls<V>(
     let mount = find_longest_path_prefix(mounts, shv_path);
     let is_mount_point = mount.is_some();
     let children_on_path = children_on_path(mounts, shv_path);
-    let is_leaf = match &children_on_path {
-        None => is_mount_point,
-        Some(dirs) => dirs.is_empty(),
-    };
+    let is_leaf = children_on_path.as_ref().map_or(is_mount_point, Vec::is_empty);
     if children_on_path.is_none() && !is_mount_point {
         // path doesn't exist
         return Some(RequestResult::Err(RpcError::new(
@@ -103,21 +100,17 @@ pub(crate) fn process_local_dir_ls<V>(
 }
 
 fn ls_children_to_result(children: Option<Vec<String>>, param: impl Into<LsParam>) -> RequestResult {
-    match children {
-        None => RequestResult::Err(RpcError::new(
+    children.map_or_else(|| RequestResult::Err(RpcError::new(
                 RpcErrorCode::MethodCallException,
                 "Invalid shv path",
-        )),
-        Some(dirs) =>
-            match param.into() {
-                LsParam::List => {
-                    let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
-                    RequestResult::Ok(res.into())
-                },
-                LsParam::Exists(path) =>
-                    RequestResult::Ok(dirs.contains(&path).into()),
-            }
-    }
+    )), |dirs| match param.into() {
+        LsParam::List => {
+            let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
+            RequestResult::Ok(res.into())
+        },
+        LsParam::Exists(path) =>
+            RequestResult::Ok(dirs.contains(&path).into()),
+    })
 }
 
 #[async_trait]
