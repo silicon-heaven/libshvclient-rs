@@ -281,24 +281,22 @@ impl ClientCommandSender {
             Err(err) => Box::pin(futures::stream::once(async { Err(err) })),
             Ok(receiver) => {
                 let mapped = receiver
-                    .map(move |frame|
-                        frame
-                        .to_rpcmesage()
-                        .map_err(|e| make_error(InvalidMessage(e.to_string())))
-                        .and_then(|rpcmsg|
-                            rpcmsg
+                    .map(move |frame| {
+                        let rpcmsg = frame
+                            .to_rpcmesage()
+                            .map_err(|e| make_error(InvalidMessage(e.to_string())))?;
+                        let resp = rpcmsg
                             .response()
-                            .map_err(|e| make_error(RpcError(e)))
-                            .and_then(|resp| match resp {
-                                shvrpc::rpcmessage::Response::Success(rpc_value) =>
-                                    R::try_from(rpc_value)
-                                    .map(RpcCallResponse::Success)
-                                    .map_err(|e| make_error(ResultTypeMismatch(e.to_string()))),
-                                shvrpc::rpcmessage::Response::Delay(progress) =>
-                                    Ok(RpcCallResponse::Delay(progress)),
-                            })
-                        )
-                    );
+                            .map_err(|e| make_error(RpcError(e)))?;
+                        match resp {
+                            shvrpc::rpcmessage::Response::Success(rpc_value) =>
+                                R::try_from(rpc_value)
+                                .map(RpcCallResponse::Success)
+                                .map_err(|e| make_error(ResultTypeMismatch(e.to_string()))),
+                            shvrpc::rpcmessage::Response::Delay(progress) =>
+                                Ok(RpcCallResponse::Delay(progress)),
+                        }
+                    });
                 Box::pin(mapped)
             }
         }

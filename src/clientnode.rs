@@ -368,11 +368,10 @@ impl NodeHandler for DynamicNodeHandler {
                         }
                         ls_handler()
                             .await
-                            .map(|ls_result|
-                                ls_result.and_then(|children|
-                                    ls_children_to_result(Some(children), request.param())
-                                )
-                            )
+                            .map(|ls_result| {
+                                let children = ls_result?;
+                                ls_children_to_result(Some(children), request.param())
+                            })
                     },
                     MethodHandlerType::Method(MethodHandler(method_handler)) => {
                         let method = request.method().unwrap_or_default();
