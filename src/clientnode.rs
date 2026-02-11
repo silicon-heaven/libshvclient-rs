@@ -776,6 +776,7 @@ mod tests {
 
     #[test]
     fn longest_path_prefix() {
+        #[expect(clippy::zero_sized_map_values, reason = "Fine for tests")]
         let map = BTreeMap::from([
             ("".to_string(), ()),
             ("foo".to_string(), ()),
@@ -799,6 +800,7 @@ mod tests {
 
     #[test]
     fn local_dir_ls_with_root() {
+        #[expect(clippy::zero_sized_map_values, reason = "Fine for tests")]
         let mounts = BTreeMap::from([
             ("".to_string(), ()),
             ("foo/x".to_string(), ()),
@@ -847,6 +849,7 @@ mod tests {
 
     #[test]
     fn local_dir_ls_without_root() {
+        #[expect(clippy::zero_sized_map_values, reason = "Fine for tests")]
         let mounts = BTreeMap::from([
             ("foo".to_string(), ()),
             ("foo/x/y".to_string(), ()),
