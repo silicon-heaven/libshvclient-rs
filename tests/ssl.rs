@@ -138,7 +138,7 @@ fn ssl() {
             .await {
             Ok(Ok(ClientEvent::Connected(..))) => { },
             Ok(_) => panic!("Client connection to broker error"),
-            Err(_) => panic!("Client connection to broker timed out"),
+            Err(err) => panic!("Client connection to broker timed out: {err}"),
         };
 
         let res = RpcCallDirList::new(".app")
