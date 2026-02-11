@@ -38,8 +38,7 @@ fn builtin_dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: imp
             methods
                 .into_iter()
                 .find(|m| m.name.as_ref() == method_name)
-                .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
-                .unwrap_or(false.into())
+                .map_or_else(|| false.into(), |m| m.to_rpcvalue(metamethod::DirFormat::IMap))
         }
     }
 }
