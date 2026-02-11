@@ -1015,7 +1015,7 @@ mod tests {
 
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx = cli_cmd_tx
@@ -1046,7 +1046,7 @@ mod tests {
                 // The subscription response
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx_1 = cli_cmd_tx
@@ -1167,7 +1167,7 @@ mod tests {
 
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx = cli_cmd_tx
@@ -1198,7 +1198,7 @@ mod tests {
                 // The subscription response
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx_1 = cli_cmd_tx
@@ -1506,7 +1506,7 @@ mod tests {
 
             #[generics(TestDriverBounds)]
             pub fn run_test(test_drv: C, custom_client: Option<Client<Full>>) {
-                let _ = simple_logger::init_with_level(log::Level::Debug);
+                simple_logger::init_with_level(log::Level::Debug).ok();
 
                 #[cfg(feature = "tokio")]
                 ::tokio::runtime::Builder::new_multi_thread()
