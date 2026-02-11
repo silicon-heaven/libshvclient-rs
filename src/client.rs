@@ -452,79 +452,76 @@ impl<V: ClientVariant> Client<V> {
                         panic!("ClientCommand channel has been unexpectedly closed");
                     },
                 },
-                conn_event_result = next_conn_event => match conn_event_result {
-                    Some(conn_event) => {
-                        use ConnectionEvent::*;
-                        match conn_event {
-                            RpcFrameReceived(frame) => {
-                                self
-                                    .process_rpc_frame(
-                                        frame,
-                                        &client_cmd_tx,
-                                        &mut pending_rpc_calls,
-                                        &mut subscriptions,
-                                        &mut subscription_requests,
-                                        &shv_api_version,
-                                    )
-                                    .await
-                                    .unwrap_or_else(|e| error!("Cannot process an RPC frame: {e}"));
-                                }
-                            ConnectionFailed(kind) => {
-                                if let Err(err) = client_events_tx.try_broadcast(ClientEvent::ConnectionFailed(kind)) {
-                                    error!("Client event `ConnectionFailed` broadcast error: {err}");
-                                }
+                conn_event_result = next_conn_event => if let Some(conn_event) = conn_event_result {
+                    use ConnectionEvent::*;
+                    match conn_event {
+                        RpcFrameReceived(frame) => {
+                            self
+                                .process_rpc_frame(
+                                    frame,
+                                    &client_cmd_tx,
+                                    &mut pending_rpc_calls,
+                                    &mut subscriptions,
+                                    &mut subscription_requests,
+                                    &shv_api_version,
+                                )
+                                .await
+                                .unwrap_or_else(|e| error!("Cannot process an RPC frame: {e}"));
                             }
-                            Connected(sender) => {
-                                conn_cmd_sender = Some(sender);
-                                // Check SHV API version
-                                let client_cmd_tx = client_cmd_tx.clone();
-                                let api_version_tx = api_version_tx.clone();
-                                crate::runtime::spawn_task(async move {
-                                    let api_version_res = check_shv_api_version(client_cmd_tx)
-                                        .await
-                                        .inspect_err(|e| warn!("check_api_version failed: {e}"));
-                                    api_version_tx
-                                        .unbounded_send(api_version_res)
-                                        .unwrap_or_else(|e| warn!("check_api_version send result failed: {e}"));
-                                }).detach();
-                            }
-                            HeartbeatTimeout => {
-                                if let Some(api_version) = &shv_api_version {
-                                    let broker_app_path = match api_version {
-                                        ShvApiVersion::V2 => ".broker/app",
-                                        ShvApiVersion::V3 => ".app",
-                                    };
-                                    let message = RpcMessage::new_request(broker_app_path, METH_PING);
-                                    client_cmd_tx
-                                        .send_message(message)
-                                        .unwrap_or_else(|e|
-                                            error!("Cannot send ping through ClientCommand channel: {e}")
-                                        );
-                                } else {
-                                    warn!("Unable to send ping, because SHV API version is unknown.");
-                                }
-                            }
-                            Disconnected => {
-                                conn_cmd_sender = None;
-                                // NOTE: When the client is disconnected, the broker also knows that
-                                // (because of heartbeats) and it should remove all the subscriptions
-                                // registered by the client, so the client can also safely clear
-                                // the subscriptions here.
-                                subscriptions.clear();
-                                subscription_requests.clear();
-                                pending_rpc_calls.clear();
-                                rpc_call_timers.clear();
-                                if let Err(err) = client_events_tx.try_broadcast(ClientEvent::Disconnected) {
-                                    error!("Client event `Disconnected` broadcast error: {err}");
-                                }
+                        ConnectionFailed(kind) => {
+                            if let Err(err) = client_events_tx.try_broadcast(ClientEvent::ConnectionFailed(kind)) {
+                                error!("Client event `ConnectionFailed` broadcast error: {err}");
                             }
                         }
-                        next_conn_event = conn_events_rx.next().fuse();
+                        Connected(sender) => {
+                            conn_cmd_sender = Some(sender);
+                            // Check SHV API version
+                            let client_cmd_tx = client_cmd_tx.clone();
+                            let api_version_tx = api_version_tx.clone();
+                            crate::runtime::spawn_task(async move {
+                                let api_version_res = check_shv_api_version(client_cmd_tx)
+                                    .await
+                                    .inspect_err(|e| warn!("check_api_version failed: {e}"));
+                                api_version_tx
+                                    .unbounded_send(api_version_res)
+                                    .unwrap_or_else(|e| warn!("check_api_version send result failed: {e}"));
+                            }).detach();
+                        }
+                        HeartbeatTimeout => {
+                            if let Some(api_version) = &shv_api_version {
+                                let broker_app_path = match api_version {
+                                    ShvApiVersion::V2 => ".broker/app",
+                                    ShvApiVersion::V3 => ".app",
+                                };
+                                let message = RpcMessage::new_request(broker_app_path, METH_PING);
+                                client_cmd_tx
+                                    .send_message(message)
+                                    .unwrap_or_else(|e|
+                                        error!("Cannot send ping through ClientCommand channel: {e}")
+                                    );
+                            } else {
+                                warn!("Unable to send ping, because SHV API version is unknown.");
+                            }
+                        }
+                        Disconnected => {
+                            conn_cmd_sender = None;
+                            // NOTE: When the client is disconnected, the broker also knows that
+                            // (because of heartbeats) and it should remove all the subscriptions
+                            // registered by the client, so the client can also safely clear
+                            // the subscriptions here.
+                            subscriptions.clear();
+                            subscription_requests.clear();
+                            pending_rpc_calls.clear();
+                            rpc_call_timers.clear();
+                            if let Err(err) = client_events_tx.try_broadcast(ClientEvent::Disconnected) {
+                                error!("Client event `Disconnected` broadcast error: {err}");
+                            }
+                        }
                     }
-                    None => {
-                        info!("Connection task terminated, exiting client loop");
-                        return Ok(());
-                    }
+                    next_conn_event = conn_events_rx.next().fuse();
+                } else {
+                    info!("Connection task terminated, exiting client loop");
+                    return Ok(());
                 },
                 api_version_result = api_version_rx.next() => match api_version_result {
                     Some(Ok(api_version)) => {
