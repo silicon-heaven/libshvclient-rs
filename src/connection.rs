@@ -169,8 +169,8 @@ async fn connection_loop(
     let login_params = LoginParams {
         user,
         password,
-        mount_point: config.mount.clone().unwrap_or_default().to_owned(),
-        device_id: config.device_id.clone().unwrap_or_default().to_owned(),
+        mount_point: config.mount.clone().unwrap_or_default(),
+        device_id: config.device_id.clone().unwrap_or_default(),
         heartbeat_interval,
         ..Default::default()
     };
