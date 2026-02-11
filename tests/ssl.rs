@@ -139,7 +139,7 @@ fn ssl() {
             Ok(Ok(ClientEvent::Connected(..))) => { },
             Ok(_) => panic!("Client connection to broker error"),
             Err(err) => panic!("Client connection to broker timed out: {err}"),
-        };
+        }
 
         let res = RpcCallDirList::new(".app")
             .timeout(Duration::from_secs(3))

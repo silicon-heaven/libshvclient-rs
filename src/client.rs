@@ -593,7 +593,7 @@ impl<V: ClientVariant> Client<V> {
                             };
                             client_cmd_tx.send_message(resp)?;
                         }
-                    };
+                    }
                 } else {
                     warn!("Invalid request frame received.");
                 }
