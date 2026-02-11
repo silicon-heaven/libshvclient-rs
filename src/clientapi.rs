@@ -180,7 +180,7 @@ impl ClientCommandSender {
             response_sender,
             timeout,
         })
-        .map(|_| response_receiver)
+        .map(|()| response_receiver)
     }
 
     pub async fn call_dir(&self, path: &str, param: DirParam, timeout: Option<Duration>) -> Result<DirResult, CallRpcMethodError> {

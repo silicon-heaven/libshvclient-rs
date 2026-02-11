@@ -367,7 +367,7 @@ impl NodeHandler for DynamicNodeHandler {
                         let mm_dir = get_method(&methods, METH_DIR)
                             .map_or(static_ref::META_METHOD_DIR, extract_second_field);
                         let response = check_request_access_for_method(request, mount_path, mm_dir)
-                            .map(|_| builtin_dir(all_methods(methods).as_ref(), request.param()));
+                            .map(|()| builtin_dir(all_methods(methods).as_ref(), request.param()));
                         Some(response)
                     }
                     MethodHandlerType::Ls(LsHandler(ls_handler)) => {
@@ -514,7 +514,7 @@ fn check_request_access<'a, 'r>(
         let path = full_shv_path(mount_path.as_ref(), request.shv_path().unwrap_or_default());
         return Err(rpc_error_unknown_method_on_path(path, method))
     };
-    check_request_access_for_method(request, mount_path, mm).map(|_| method)
+    check_request_access_for_method(request, mount_path, mm).map(|()| method)
 }
 
 pub fn send_response(request: &RpcMessage, client_cmd_tx: &ClientCommandSender, result: Result<RpcValue, RpcError>) {
