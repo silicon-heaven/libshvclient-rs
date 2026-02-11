@@ -45,6 +45,7 @@ pub fn spawn_connection_task(config: &ClientConfig, conn_evt_tx: Sender<Connecti
 pub(crate) trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 
+#[expect(clippy::ref_option, reason = "Better ergonomics with the tuple")]
 async fn connect(address: &str, tls: &Option<(Arc<TlsConnector>, ServerName<'static>)>)
 -> shvrpc::Result<Box<dyn AsyncReadWrite + Send + Unpin>>
 {
@@ -126,6 +127,7 @@ async fn connection_task(config: ClientConfig, conn_event_sender: Sender<Connect
     // by conn_event_sender drop that occurs here.
 }
 
+#[expect(clippy::ref_option, reason = "Better ergonomics with the tuple")]
 async fn connection_loop(
     config: &ClientConfig,
     tls: &Option<(Arc<TlsConnector>, ServerName<'static>)>,
