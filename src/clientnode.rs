@@ -82,24 +82,22 @@ pub(crate) fn process_local_dir_ls<V>(
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let dir = builtin_dir(DIR_LS_METHODS, rpcmsg.param());
             return Some(RequestResult::Ok(dir));
-        } else {
-            return Some(RequestResult::Err(RpcError::new(
-                RpcErrorCode::InvalidRequest,
-                "Cannot convert RPC frame to RPC message".to_string(),
-            )));
         }
+        return Some(RequestResult::Err(RpcError::new(
+            RpcErrorCode::InvalidRequest,
+            "Cannot convert RPC frame to RPC message".to_string(),
+        )));
     }
     if method == METH_LS && !is_leaf {
         // ls on not-leaf node must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let ls = ls_children_to_result(children_on_path, rpcmsg.param());
             return Some(ls);
-        } else {
-            return Some(RequestResult::Err(RpcError::new(
-                RpcErrorCode::InvalidRequest,
-                "Cannot convert RPC frame to RPC message".to_string(),
-            )));
         }
+        return Some(RequestResult::Err(RpcError::new(
+            RpcErrorCode::InvalidRequest,
+            "Cannot convert RPC frame to RPC message".to_string(),
+        )));
     }
     None
 }
