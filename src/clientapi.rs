@@ -94,9 +94,8 @@ impl std::fmt::Display for CallRpcMethodErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let err_msg = match self {
             CallRpcMethodErrorKind::ConnectionClosed => "Connection closed",
-            CallRpcMethodErrorKind::InvalidMessage(msg) => msg,
             CallRpcMethodErrorKind::RpcError(err) => &err.to_string(),
-            CallRpcMethodErrorKind::ResultTypeMismatch(msg) => msg,
+            CallRpcMethodErrorKind::InvalidMessage(msg) | CallRpcMethodErrorKind::ResultTypeMismatch(msg) => msg,
         };
         write!(f, "{err_msg}")
     }
