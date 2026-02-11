@@ -44,7 +44,7 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
             url: Url::parse(&format!("ssl://admin:admin@{BROKER_ADDRESS}?ca={ca_crt_path}")).expect("Url must be correct"),
             device_id: None,
             mount: None,
-            heartbeat_interval: Duration::from_secs(60),
+            heartbeat_interval: Duration::from_mins(1),
             reconnect_interval: None,
         };
         shvclient::client::Client::new_plain()
