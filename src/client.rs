@@ -107,9 +107,7 @@ impl Subscriptions {
         }
         let glob = ri.to_glob()?;
         let subscriptions = &mut self.0;
-        if subscriptions.iter().any(|subscr| subscr.subscr_id == subscr_id) {
-            panic!("Tried to add a subscription with already existing ID: {subscr_id}. RI: {ri}. Dump: {self:?}");
-        }
+        assert!(!subscriptions.iter().any(|subscr| subscr.subscr_id == subscr_id), "Tried to add a subscription with already existing ID: {subscr_id}. RI: {ri}. Dump: {self:?}");
         let subscribed_new_ri = !subscriptions.iter().any(|subscr | subscr.glob.as_ri() == &ri);
         let opt_subscription_request = subscribed_new_ri.then(||
             create_subscription_request(&ri, SubscriptionRequest::Subscribe, api_version)
