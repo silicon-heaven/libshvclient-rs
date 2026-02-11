@@ -23,7 +23,7 @@ async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     shvclient::runtime::spawn_task(async {
         run_broker(Arc::new(BrokerImpl::new(broker_config, access_config, sender, None)), reciever)
             .await
-            .expect("broker accept_loop failed")
+            .expect("broker accept_loop failed");
     }).detach();
     // Wait for the broker
     let start = std::time::Instant::now();
@@ -53,7 +53,7 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
                     .unwrap_or_else(|(commands_tx, _)| {
                         warn!("Client channels dropped before handed to the caller. Terminating the client");
                         commands_tx.terminate_client();
-                    })
+                    });
             })
             .await
             .unwrap_or_else(|e| error!("Client finished with error: {e}"));
