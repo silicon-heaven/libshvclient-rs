@@ -576,7 +576,7 @@ impl<V: ClientVariant> Client<V> {
                             if let Some((mount, path)) = find_longest_path_prefix(&self.mounts, shv_path) {
                                 request_msg.set_shvpath(path);
                                 let node = self.mounts.get(mount).unwrap_or_else(|| panic!("A node on path '{mount}' should exist"));
-                                node.process_request(request_msg, mount.to_owned(), client_cmd_tx.clone()).await;
+                                node.process_request(request_msg, mount.to_owned(), client_cmd_tx.clone());
                             } else {
                                 let method = frame.method().unwrap_or_default();
                                 resp.set_error(RpcError::new(

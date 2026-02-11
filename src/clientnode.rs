@@ -435,7 +435,7 @@ impl ClientNode {
         Self::Dynamic(DynamicNodeHandler::new(func))
     }
 
-    pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender) {
+    pub(crate) fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender) {
         fn spawn_task_for_handler(
             handler: impl NodeHandler + Send + 'static,
             request: RpcMessage,

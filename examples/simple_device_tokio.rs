@@ -155,7 +155,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     };
 
-    async fn dyn_request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender, counter: Arc<RwLock<i32>>) -> RequestHandlerResult {
+    fn dyn_request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender, counter: Arc<RwLock<i32>>) -> RequestHandlerResult {
         let shv_path = rq.shv_path().unwrap_or_default();
 
         if shv_path.is_empty() {
@@ -309,7 +309,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         .mount_dynamic("status/dyn", move |rq, client_cmd_tx| {
             let counter = counter.clone();
             async move {
-                dyn_request_handler(rq, client_cmd_tx, counter).await
+                dyn_request_handler(rq, client_cmd_tx, counter)
             }
         })
         .run_with_init(&client_config, app_tasks)
