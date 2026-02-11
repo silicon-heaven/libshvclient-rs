@@ -1,0 +1,8 @@
+allow-expect-in-consts = true
+allow-expect-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-one-hash-in-raw-strings = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
+allow-unwrap-in-tests = true
+avoid-breaking-exported-api = false
