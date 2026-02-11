@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "Fine for a binary")]
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 
