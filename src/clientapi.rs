@@ -358,7 +358,7 @@ impl ClientCommandSender {
                     notifications_tx,
                 }
             )
-            .map_err(|_| make_error(ConnectionClosed))?;
+            .map_err(|_err| make_error(ConnectionClosed))?;
 
         // The Subscriber is created at this point, because if an error occurs during the subscriber
         // response processing below, the drop() on Subscriber will send ClientCommand::Unsubscribe.

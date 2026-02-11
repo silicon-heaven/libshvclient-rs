@@ -214,7 +214,7 @@ async fn connection_loop(
                 .receive_frame()
                 .timeout(futures_time::time::Duration::from(read_timeout))
                 .await
-                .map_err(|_| shvrpc::framerw::ReceiveFrameError::Timeout(None))
+                .map_err(|_err| shvrpc::framerw::ReceiveFrameError::Timeout(None))
                 .flatten();
             Some((frame_res, reader))
         }));
