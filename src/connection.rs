@@ -5,7 +5,7 @@ use duration_str::HumanFormat;
 use futures::{select, AsyncRead, AsyncWrite, FutureExt, StreamExt};
 use futures_rustls::pki_types::ServerName;
 use futures_rustls::TlsConnector;
-use log::*;
+use log::{info, warn, debug};
 use rustls_platform_verifier::BuilderVerifierExt;
 pub use shvrpc::client::ClientConfig;
 use shvrpc::client::LoginParams;
@@ -45,6 +45,7 @@ pub fn spawn_connection_task(config: &ClientConfig, conn_evt_tx: Sender<Connecti
 pub(crate) trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 
+#[expect(clippy::ref_option, reason = "Better ergonomics with the tuple")]
 async fn connect(address: &str, tls: &Option<(Arc<TlsConnector>, ServerName<'static>)>)
 -> shvrpc::Result<Box<dyn AsyncReadWrite + Send + Unpin>>
 {
@@ -89,46 +90,44 @@ enum ConnectionLoopResult {
 }
 
 async fn connection_task(config: ClientConfig, conn_event_sender: Sender<ConnectionEvent>) {
-    async {
-        let tls = if config.url.scheme() == "ssl" {
-            let tls_connector = Arc::new(build_tls_connector(&config.url)
-                .unwrap_or_else(|err| panic!("Cannot initialize TLS: {err}"))
-            );
-            let server_name = futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
-                .unwrap_or_else(|err| panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str()))
-                .to_owned();
-            Some((tls_connector, server_name))
-        } else {
-            None
-        };
+    let tls = if config.url.scheme() == "ssl" {
+        let tls_connector = Arc::new(build_tls_connector(&config.url)
+            .unwrap_or_else(|err| panic!("Cannot initialize TLS: {err}"))
+        );
+        let server_name = futures_rustls::pki_types::ServerName::try_from(config.url.host_str().unwrap_or_default())
+            .unwrap_or_else(|err| panic!("Invalid TLS server name `{host:?}`: {err}", host = config.url.host_str()))
+            .to_owned();
+        Some((tls_connector, server_name))
+    } else {
+        None
+    };
 
-        if let Some(reconnect_interval) = &config.reconnect_interval {
-            info!("Reconnect interval set to: {reconnect_interval:?}");
-            loop {
-                // Check if the client loop has been terminated before trying to connect.
-                // The client loop termination is then detected in the connection_loop based on
-                // conn_event_receiver, but it happens only after a successful connection.
-                if conn_event_sender.is_closed() {
-                    warn!("conn_event_sender is closed");
-                    break;
-                }
-                match connection_loop(&config, &tls, &conn_event_sender).await {
-                    ConnectionLoopResult::ClientTerminated => break,
-                    ConnectionLoopResult::ConnectionClosed => {
-                        info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
-                        futures_time::task::sleep((*reconnect_interval).into()).await;
-                    }
+    if let Some(reconnect_interval) = &config.reconnect_interval {
+        info!("Reconnect interval set to: {reconnect_interval:?}");
+        loop {
+            // Check if the client loop has been terminated before trying to connect.
+            // The client loop termination is then detected in the connection_loop based on
+            // conn_event_receiver, but it happens only after a successful connection.
+            if conn_event_sender.is_closed() {
+                warn!("conn_event_sender is closed");
+                break;
+            }
+            match Box::pin(connection_loop(&config, &tls, &conn_event_sender)).await {
+                ConnectionLoopResult::ClientTerminated => break,
+                ConnectionLoopResult::ConnectionClosed => {
+                    info!("Connection closed, reconnecting after {}", reconnect_interval.human_format());
+                    futures_time::task::sleep((*reconnect_interval).into()).await;
                 }
             }
-        } else {
-            connection_loop(&config, &tls, &conn_event_sender).await;
         }
+    } else {
+        Box::pin(connection_loop(&config, &tls, &conn_event_sender)).await;
     }
-    .await;
     // NOTE: The connection_task termination is detected in the client_task
     // by conn_event_sender drop that occurs here.
 }
 
+#[expect(clippy::ref_option, reason = "Better ergonomics with the tuple")]
 async fn connection_loop(
     config: &ClientConfig,
     tls: &Option<(Arc<TlsConnector>, ServerName<'static>)>,
@@ -169,8 +168,8 @@ async fn connection_loop(
     let login_params = LoginParams {
         user,
         password,
-        mount_point: config.mount.clone().unwrap_or_default().to_owned(),
-        device_id: config.device_id.clone().unwrap_or_default().to_owned(),
+        mount_point: config.mount.clone().unwrap_or_default(),
+        device_id: config.device_id.clone().unwrap_or_default(),
         heartbeat_interval,
         ..Default::default()
     };
@@ -217,7 +216,7 @@ async fn connection_loop(
                 .receive_frame()
                 .timeout(futures_time::time::Duration::from(read_timeout))
                 .await
-                .map_err(|_| shvrpc::framerw::ReceiveFrameError::Timeout(None))
+                .map_err(|_err| shvrpc::framerw::ReceiveFrameError::Timeout(None))
                 .flatten();
             Some((frame_res, reader))
         }));
@@ -230,27 +229,24 @@ async fn connection_loop(
                         .unwrap_or_else(|e| debug!("ConnectionEvent::HeartbeatTimeout send failed: {e}"));
                 }
                 conn_cmd_result = conn_cmd_receiver.next() => {
-                    match conn_cmd_result {
-                        Some(connection_command) => {
-                            match connection_command {
-                                ConnectionCommand::SendMessage(message) => {
-                                    // reset heartbeat timer
-                                    fut_heartbeat_timeout = futures_time::task::sleep(heartbeat_interval.into()).fuse();
-                                    if let Err(err) = writer_tx.unbounded_send(message) {
-                                        warn!("Cannot send message to the writer task: {err}");
-                                        conn_event_sender
-                                            .unbounded_send(ConnectionEvent::Disconnected)
-                                            .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
-                                        return ConnectionLoopResult::ConnectionClosed;
-                                    }
-                                },
-                            }
-                        },
-                        None => {
-                            // The only instance of TX is gone, the client loop has terminated
-                            warn!("Connection command channel closed, client loop has terminated");
-                            return ConnectionLoopResult::ClientTerminated;
-                        },
+                    if let Some(connection_command) = conn_cmd_result {
+                        match connection_command {
+                            ConnectionCommand::SendMessage(message) => {
+                                // reset heartbeat timer
+                                fut_heartbeat_timeout = futures_time::task::sleep(heartbeat_interval.into()).fuse();
+                                if let Err(err) = writer_tx.unbounded_send(message) {
+                                    warn!("Cannot send message to the writer task: {err}");
+                                    conn_event_sender
+                                        .unbounded_send(ConnectionEvent::Disconnected)
+                                        .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
+                                    return ConnectionLoopResult::ConnectionClosed;
+                                }
+                            },
+                        }
+                    } else {
+                        // The only instance of TX is gone, the client loop has terminated
+                        warn!("Connection command channel closed, client loop has terminated");
+                        return ConnectionLoopResult::ClientTerminated;
                     }
                 }
                 receive_frame_result = frame_stream.select_next_some() => {

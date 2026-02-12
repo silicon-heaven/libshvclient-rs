@@ -38,8 +38,7 @@ fn builtin_dir<'a>(methods: impl IntoIterator<Item = &'a MetaMethod>, param: imp
             methods
                 .into_iter()
                 .find(|m| m.name.as_ref() == method_name)
-                .map(|m| m.to_rpcvalue(metamethod::DirFormat::IMap))
-                .unwrap_or(false.into())
+                .map_or_else(|| false.into(), |m| m.to_rpcvalue(metamethod::DirFormat::IMap))
         }
     }
 }
@@ -61,10 +60,7 @@ pub(crate) fn process_local_dir_ls<V>(
     let mount = find_longest_path_prefix(mounts, shv_path);
     let is_mount_point = mount.is_some();
     let children_on_path = children_on_path(mounts, shv_path);
-    let is_leaf = match &children_on_path {
-        None => is_mount_point,
-        Some(dirs) => dirs.is_empty(),
-    };
+    let is_leaf = children_on_path.as_ref().map_or(is_mount_point, Vec::is_empty);
     if children_on_path.is_none() && !is_mount_point {
         // path doesn't exist
         return Some(RequestResult::Err(RpcError::new(
@@ -83,44 +79,38 @@ pub(crate) fn process_local_dir_ls<V>(
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let dir = builtin_dir(DIR_LS_METHODS, rpcmsg.param());
             return Some(RequestResult::Ok(dir));
-        } else {
-            return Some(RequestResult::Err(RpcError::new(
-                RpcErrorCode::InvalidRequest,
-                "Cannot convert RPC frame to RPC message".to_string(),
-            )));
         }
+        return Some(RequestResult::Err(RpcError::new(
+            RpcErrorCode::InvalidRequest,
+            "Cannot convert RPC frame to RPC message".to_string(),
+        )));
     }
     if method == METH_LS && !is_leaf {
         // ls on not-leaf node must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let ls = ls_children_to_result(children_on_path, rpcmsg.param());
             return Some(ls);
-        } else {
-            return Some(RequestResult::Err(RpcError::new(
-                RpcErrorCode::InvalidRequest,
-                "Cannot convert RPC frame to RPC message".to_string(),
-            )));
         }
+        return Some(RequestResult::Err(RpcError::new(
+            RpcErrorCode::InvalidRequest,
+            "Cannot convert RPC frame to RPC message".to_string(),
+        )));
     }
     None
 }
 
 fn ls_children_to_result(children: Option<Vec<String>>, param: impl Into<LsParam>) -> RequestResult {
-    match children {
-        None => RequestResult::Err(RpcError::new(
+    children.map_or_else(|| RequestResult::Err(RpcError::new(
                 RpcErrorCode::MethodCallException,
                 "Invalid shv path",
-        )),
-        Some(dirs) =>
-            match param.into() {
-                LsParam::List => {
-                    let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
-                    RequestResult::Ok(res.into())
-                },
-                LsParam::Exists(path) =>
-                    RequestResult::Ok(dirs.contains(&path).into()),
-            }
-    }
+    )), |dirs| match param.into() {
+        LsParam::List => {
+            let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
+            RequestResult::Ok(res.into())
+        },
+        LsParam::Exists(path) =>
+            RequestResult::Ok(dirs.contains(&path).into()),
+    })
 }
 
 #[async_trait]
@@ -172,6 +162,7 @@ pub struct LsMethodResolver(Priv);
 pub struct MethodResolver(String);
 
 impl DirMethodResolver {
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve(&self, methods: impl Into<MetaMethods>) -> RequestHandlerResult {
         Ok(ResolvedRequest {
             methods: methods.into(),
@@ -181,6 +172,7 @@ impl DirMethodResolver {
 }
 
 impl LsMethodResolver {
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve<F, Fut>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -192,6 +184,7 @@ impl LsMethodResolver {
         })
     }
 
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve_opt<F, Fut>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -205,6 +198,7 @@ impl LsMethodResolver {
 }
 
 impl MethodResolver {
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve<F, Fut, T>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -217,6 +211,7 @@ impl MethodResolver {
         })
     }
 
+    #[expect(clippy::unnecessary_wraps, reason = "Better ergonomics")]
     pub fn resolve_opt<F, Fut, T>(&self, methods: impl Into<MetaMethods>, handler: F) -> RequestHandlerResult
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -367,7 +362,7 @@ impl NodeHandler for DynamicNodeHandler {
                         let mm_dir = get_method(&methods, METH_DIR)
                             .map_or(static_ref::META_METHOD_DIR, extract_second_field);
                         let response = check_request_access_for_method(request, mount_path, mm_dir)
-                            .map(|_| builtin_dir(all_methods(methods).as_ref(), request.param()));
+                            .map(|()| builtin_dir(all_methods(methods).as_ref(), request.param()));
                         Some(response)
                     }
                     MethodHandlerType::Ls(LsHandler(ls_handler)) => {
@@ -378,11 +373,10 @@ impl NodeHandler for DynamicNodeHandler {
                         }
                         ls_handler()
                             .await
-                            .map(|ls_result|
-                                ls_result.and_then(|children|
-                                    ls_children_to_result(Some(children), request.param())
-                                )
-                            )
+                            .map(|ls_result| {
+                                let children = ls_result?;
+                                ls_children_to_result(Some(children), request.param())
+                            })
                     },
                     MethodHandlerType::Method(MethodHandler(method_handler)) => {
                         let method = request.method().unwrap_or_default();
@@ -413,7 +407,7 @@ impl MethodHandler {
         T: Into<RpcValue>,
     {
         Self(Box::new(move || Box::pin(async move {
-            func().await.map(|res| res.map(|val| val.into()))
+            func().await.map(|res| res.map(Into::into))
         })))
     }
 }
@@ -441,7 +435,7 @@ impl ClientNode {
         Self::Dynamic(DynamicNodeHandler::new(func))
     }
 
-    pub(crate) async fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender) {
+    pub(crate) fn process_request(&self, request: RpcMessage, mount_path: String, client_cmd_tx: ClientCommandSender) {
         fn spawn_task_for_handler(
             handler: impl NodeHandler + Send + 'static,
             request: RpcMessage,
@@ -514,7 +508,7 @@ fn check_request_access<'a, 'r>(
         let path = full_shv_path(mount_path.as_ref(), request.shv_path().unwrap_or_default());
         return Err(rpc_error_unknown_method_on_path(path, method))
     };
-    check_request_access_for_method(request, mount_path, mm).map(|_| method)
+    check_request_access_for_method(request, mount_path, mm).map(|()| method)
 }
 
 pub fn send_response(request: &RpcMessage, client_cmd_tx: &ClientCommandSender, result: Result<RpcValue, RpcError>) {
@@ -776,6 +770,7 @@ mod tests {
 
     #[test]
     fn longest_path_prefix() {
+        #[expect(clippy::zero_sized_map_values, reason = "Fine for tests")]
         let map = BTreeMap::from([
             ("".to_string(), ()),
             ("foo".to_string(), ()),
@@ -799,6 +794,7 @@ mod tests {
 
     #[test]
     fn local_dir_ls_with_root() {
+        #[expect(clippy::zero_sized_map_values, reason = "Fine for tests")]
         let mounts = BTreeMap::from([
             ("".to_string(), ()),
             ("foo/x".to_string(), ()),
@@ -847,6 +843,7 @@ mod tests {
 
     #[test]
     fn local_dir_ls_without_root() {
+        #[expect(clippy::zero_sized_map_values, reason = "Fine for tests")]
         let mounts = BTreeMap::from([
             ("foo".to_string(), ()),
             ("foo/x/y".to_string(), ()),

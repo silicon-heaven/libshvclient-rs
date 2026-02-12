@@ -74,7 +74,7 @@ impl Drop for Subscriber {
         if let Err(err) = self.client_cmd_tx.unbounded_send(
             ClientCommand::Unsubscribe { subscription_id: self.subscription_id, }) {
             warn!("Cannot unsubscribe `{}`: {err}", &self.ri);
-        };
+        }
     }
 }
 
@@ -94,9 +94,8 @@ impl std::fmt::Display for CallRpcMethodErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let err_msg = match self {
             CallRpcMethodErrorKind::ConnectionClosed => "Connection closed",
-            CallRpcMethodErrorKind::InvalidMessage(msg) => msg,
             CallRpcMethodErrorKind::RpcError(err) => &err.to_string(),
-            CallRpcMethodErrorKind::ResultTypeMismatch(msg) => msg,
+            CallRpcMethodErrorKind::InvalidMessage(msg) | CallRpcMethodErrorKind::ResultTypeMismatch(msg) => msg,
         };
         write!(f, "{err_msg}")
     }
@@ -180,7 +179,7 @@ impl ClientCommandSender {
             response_sender,
             timeout,
         })
-        .map(|_| response_receiver)
+        .map(|()| response_receiver)
     }
 
     pub async fn call_dir(&self, path: &str, param: DirParam, timeout: Option<Duration>) -> Result<DirResult, CallRpcMethodError> {
@@ -282,24 +281,22 @@ impl ClientCommandSender {
             Err(err) => Box::pin(futures::stream::once(async { Err(err) })),
             Ok(receiver) => {
                 let mapped = receiver
-                    .map(move |frame|
-                        frame
-                        .to_rpcmesage()
-                        .map_err(|e| make_error(InvalidMessage(e.to_string())))
-                        .and_then(|rpcmsg|
-                            rpcmsg
+                    .map(move |frame| {
+                        let rpcmsg = frame
+                            .to_rpcmesage()
+                            .map_err(|e| make_error(InvalidMessage(e.to_string())))?;
+                        let resp = rpcmsg
                             .response()
-                            .map_err(|e| make_error(RpcError(e)))
-                            .and_then(|resp| match resp {
-                                shvrpc::rpcmessage::Response::Success(rpc_value) =>
-                                    R::try_from(rpc_value)
-                                    .map(RpcCallResponse::Success)
-                                    .map_err(|e| make_error(ResultTypeMismatch(e.to_string()))),
-                                shvrpc::rpcmessage::Response::Delay(progress) =>
-                                    Ok(RpcCallResponse::Delay(progress)),
-                            })
-                        )
-                    );
+                            .map_err(|e| make_error(RpcError(e)))?;
+                        match resp {
+                            shvrpc::rpcmessage::Response::Success(rpc_value) =>
+                                R::try_from(rpc_value)
+                                .map(RpcCallResponse::Success)
+                                .map_err(|e| make_error(ResultTypeMismatch(e.to_string()))),
+                            shvrpc::rpcmessage::Response::Delay(progress) =>
+                                Ok(RpcCallResponse::Delay(progress)),
+                        }
+                    });
                 Box::pin(mapped)
             }
         }
@@ -328,7 +325,6 @@ impl ClientCommandSender {
                     if let Some(progress_notify) = &progress_notifier {
                         progress_notify(progress);
                     }
-                    continue
                 }
                 RpcCallResponse::Success(result) => return Ok(result),
             }
@@ -360,7 +356,7 @@ impl ClientCommandSender {
                     notifications_tx,
                 }
             )
-            .map_err(|_| make_error(ConnectionClosed))?;
+            .map_err(|_err| make_error(ConnectionClosed))?;
 
         // The Subscriber is created at this point, because if an error occurs during the subscriber
         // response processing below, the drop() on Subscriber will send ClientCommand::Unsubscribe.
@@ -421,11 +417,13 @@ impl<'a> RpcCall<'a> {
         Self { path, method, param: None, timeout: None }
     }
 
+    #[must_use]
     pub fn param(mut self, param: impl Into<RpcValue>) -> Self {
         self.param = Some(param.into());
         self
     }
 
+    #[must_use]
     pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
         self.timeout = Some(timeout.into());
         self
@@ -447,7 +445,7 @@ impl<'a> RpcCall<'a> {
         client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, Some(progress_notifier)).await
     }
 
-    pub fn stream<T, R, E>(self, client_cmd_sender: &ClientCommandSender) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
+    pub fn stream<R, E>(self, client_cmd_sender: &ClientCommandSender) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
     where
         R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
@@ -468,6 +466,7 @@ impl<'a> RpcCallLsList<'a> {
         Self { path, timeout: None }
     }
 
+    #[must_use]
     pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
         self.timeout = Some(timeout.into());
         self
@@ -490,6 +489,7 @@ impl<'a> RpcCallLsExists<'a> {
         Self { path, dirname, timeout: None }
     }
 
+    #[must_use]
     pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
         self.timeout = Some(timeout.into());
         self
@@ -511,6 +511,7 @@ impl<'a> RpcCallDirList<'a> {
         Self { path, timeout: None }
     }
 
+    #[must_use]
     pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
         self.timeout = Some(timeout.into());
         self
@@ -537,6 +538,7 @@ impl<'a> RpcCallDirExists<'a> {
         Self { path, method, timeout: None }
     }
 
+    #[must_use]
     pub fn timeout(mut self, timeout: impl Into<Duration>) -> Self {
         self.timeout = Some(timeout.into());
         self

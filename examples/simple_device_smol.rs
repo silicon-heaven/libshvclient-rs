@@ -2,7 +2,7 @@ use std::sync::Arc;
 use clap::Parser;
 use futures::{select, FutureExt};
 use futures_time::time::Duration;
-use log::*;
+use log::{LevelFilter, error, info, warn};
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
@@ -55,14 +55,14 @@ fn init_logger(cli_opts: &Opts) {
             }
         }
     }
-    logger.init().unwrap();
+    logger.init().expect("Logger must work");
 }
 
 fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
     let mut config = if let Some(config_file) = &cli_opts.config {
         ClientConfig::from_file_or_default(config_file, cli_opts.create_default_config)?
     } else {
-        Default::default()
+        ClientConfig::default()
     };
     config.url = match &cli_opts.url {
         Some(url_str) => Url::parse(url_str)?,
@@ -179,8 +179,10 @@ fn main() -> shvrpc::Result<()> {
     const SMOL_THREADS: &str = "SMOL_THREADS";
     if std::env::var(SMOL_THREADS).is_err()
         && let Ok(num_threads) = std::thread::available_parallelism() {
-            // set_var called before any other threads and smol runtime
-            unsafe { std::env::set_var(SMOL_THREADS, num_threads.to_string()); }
+            // SAFETY: set_var called before any other threads and smol runtime
+            unsafe {
+                std::env::set_var(SMOL_THREADS, num_threads.to_string());
+            }
         }
     smol::block_on(async move {
         shvclient::Client::new()

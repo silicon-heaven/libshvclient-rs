@@ -7,7 +7,7 @@ use futures::{select, FutureExt, StreamExt};
 use futures::channel::mpsc::UnboundedSender;
 use futures_time::task::sleep;
 use futures_time::time::Duration;
-use log::*;
+use log::{debug, warn, error, info};
 use shvrpc::client::ClientConfig;
 use shvrpc::rpc::{Glob, ShvRI, SubscriptionParam};
 use shvrpc::rpcframe::RpcFrame;
@@ -50,6 +50,7 @@ impl SubscriptionEntry {
 #[derive(Debug, Default)]
 struct Subscriptions(Vec<SubscriptionEntry>);
 
+#[derive(Copy, Clone)]
 enum SubscriptionRequest {
     Subscribe,
     Unsubscribe,
@@ -83,7 +84,7 @@ fn create_subscription_request(ri: &ShvRI, req_type: SubscriptionRequest, api_ve
 
 impl Subscriptions {
     fn new() -> Self {
-        Default::default()
+        Self::default()
     }
 
     fn clear(&mut self) {
@@ -107,9 +108,7 @@ impl Subscriptions {
         }
         let glob = ri.to_glob()?;
         let subscriptions = &mut self.0;
-        if subscriptions.iter().any(|subscr| subscr.subscr_id == subscr_id) {
-            panic!("Tried to add a subscription with already existing ID: {subscr_id}. RI: {ri}. Dump: {self:?}");
-        }
+        assert!(!subscriptions.iter().any(|subscr| subscr.subscr_id == subscr_id), "Tried to add a subscription with already existing ID: {subscr_id}. RI: {ri}. Dump: {self:?}");
         let subscribed_new_ri = !subscriptions.iter().any(|subscr | subscr.glob.as_ri() == &ri);
         let opt_subscription_request = subscribed_new_ri.then(||
             create_subscription_request(&ri, SubscriptionRequest::Subscribe, api_version)
@@ -158,7 +157,7 @@ const RPC_CALL_DEFAULT_TIMEOUT_SECS: u64 = 10;
 impl Client<Plain> {
     pub fn new_plain() -> Self {
         Self {
-            mounts: Default::default(),
+            mounts: BTreeMap::default(),
             rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
@@ -174,30 +173,35 @@ impl Default for Client<Full> {
 impl Client<Full> {
     pub fn new() -> Self {
         Self {
-            mounts: Default::default(),
+            mounts: BTreeMap::default(),
             rpc_call_timeout: Duration::from_secs(RPC_CALL_DEFAULT_TIMEOUT_SECS),
             variant_marker: PhantomData,
         }
     }
 
+    #[must_use]
     pub fn app(self, app_node: crate::appnodes::DotAppNode) -> Self {
         self.mount(".app", ClientNode::new_static(app_node))
     }
 
+    #[must_use]
     pub fn device(self, device_node: crate::appnodes::DotDeviceNode) -> Self {
         self.mount(".device", ClientNode::new_static(device_node))
     }
 
+    #[must_use]
     pub fn mount(mut self, path: impl Into<String>, node: ClientNode) -> Self {
         self.mounts.insert(path.into(), node);
         self
     }
 
+    #[must_use]
     pub fn mount_static(mut self, path: impl Into<String>, node: impl StaticNode) -> Self {
         self.mounts.insert(path.into(), ClientNode::new_static(node));
         self
     }
 
+    #[must_use]
     pub fn mount_dynamic<F, Fut>(mut self, path: impl Into<String>, handler: F) -> Self
     where
         F: Fn(RpcMessage, ClientCommandSender) -> Fut + Sync + Send + 'static,
@@ -207,7 +211,7 @@ impl Client<Full> {
         self
     }
 
-    pub async fn run(mut self, config: &ClientConfig) -> shvrpc::Result<()> {
+    pub async fn run(self, config: &ClientConfig) -> shvrpc::Result<()> {
         self.run_with_init_opt(
             config,
             Option::<fn(_,_)>::None,
@@ -217,13 +221,14 @@ impl Client<Full> {
 }
 
 impl<V: ClientVariant> Client<V> {
+    #[must_use]
     pub fn rpc_call_timeout(mut self, timeout: Duration) -> Self {
         self.rpc_call_timeout = timeout;
         self
     }
 
     async fn run_with_init_opt<H>(
-        &mut self,
+        &self,
         config: &ClientConfig,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
@@ -235,7 +240,7 @@ impl<V: ClientVariant> Client<V> {
         self.client_loop(conn_evt_rx, init_handler).await
     }
 
-    pub async fn run_with_init<H>(mut self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
+    pub async fn run_with_init<H>(self, config: &ClientConfig, handler: H) -> shvrpc::Result<()>
     where
         H: FnOnce(ClientCommandSender, ClientEventsReceiver),
     {
@@ -267,7 +272,7 @@ impl<V: ClientVariant> Client<V> {
     }
 
     async fn client_loop<H>(
-        &mut self,
+        &self,
         mut conn_events_rx: Receiver<ConnectionEvent>,
         init_handler: Option<H>,
     ) -> shvrpc::Result<()>
@@ -357,9 +362,7 @@ impl<V: ClientVariant> Client<V> {
                                                     _ = sleep(timeout).fuse() => {
                                                         return Some((req_id, timeout.as_secs()))
                                                     }
-                                                    msg = timer_update_rx.next() => if msg.is_some() {
-                                                        continue
-                                                    } else {
+                                                    msg = timer_update_rx.next() => if msg.is_none() {
                                                         break
                                                     },
                                                 }
@@ -449,79 +452,75 @@ impl<V: ClientVariant> Client<V> {
                         panic!("ClientCommand channel has been unexpectedly closed");
                     },
                 },
-                conn_event_result = next_conn_event => match conn_event_result {
-                    Some(conn_event) => {
-                        use ConnectionEvent::*;
-                        match conn_event {
-                            RpcFrameReceived(frame) => {
-                                self
-                                    .process_rpc_frame(
-                                        frame,
-                                        &client_cmd_tx,
-                                        &mut pending_rpc_calls,
-                                        &mut subscriptions,
-                                        &mut subscription_requests,
-                                        &shv_api_version,
-                                    )
-                                    .await
-                                    .unwrap_or_else(|e| error!("Cannot process an RPC frame: {e}"));
-                                }
-                            ConnectionFailed(kind) => {
-                                if let Err(err) = client_events_tx.try_broadcast(ClientEvent::ConnectionFailed(kind)) {
-                                    error!("Client event `ConnectionFailed` broadcast error: {err}");
-                                }
+                conn_event_result = next_conn_event => if let Some(conn_event) = conn_event_result {
+                    use ConnectionEvent::*;
+                    match conn_event {
+                        RpcFrameReceived(frame) => {
+                            self
+                                .process_rpc_frame(
+                                    frame,
+                                    &client_cmd_tx,
+                                    &mut pending_rpc_calls,
+                                    &mut subscriptions,
+                                    &mut subscription_requests,
+                                    &shv_api_version,
+                                )
+                                .unwrap_or_else(|e| error!("Cannot process an RPC frame: {e}"));
                             }
-                            Connected(sender) => {
-                                conn_cmd_sender = Some(sender);
-                                // Check SHV API version
-                                let client_cmd_tx = client_cmd_tx.clone();
-                                let api_version_tx = api_version_tx.clone();
-                                crate::runtime::spawn_task(async move {
-                                    let api_version_res = check_shv_api_version(client_cmd_tx)
-                                        .await
-                                        .inspect_err(|e| warn!("check_api_version failed: {e}"));
-                                    api_version_tx
-                                        .unbounded_send(api_version_res)
-                                        .unwrap_or_else(|e| warn!("check_api_version send result failed: {e}"));
-                                }).detach();
-                            }
-                            HeartbeatTimeout => {
-                                if let Some(api_version) = &shv_api_version {
-                                    let broker_app_path = match api_version {
-                                        ShvApiVersion::V2 => ".broker/app",
-                                        ShvApiVersion::V3 => ".app",
-                                    };
-                                    let message = RpcMessage::new_request(broker_app_path, METH_PING);
-                                    client_cmd_tx
-                                        .send_message(message)
-                                        .unwrap_or_else(|e|
-                                            error!("Cannot send ping through ClientCommand channel: {e}")
-                                        );
-                                } else {
-                                    warn!("Unable to send ping, because SHV API version is unknown.");
-                                }
-                            }
-                            Disconnected => {
-                                conn_cmd_sender = None;
-                                // NOTE: When the client is disconnected, the broker also knows that
-                                // (because of heartbeats) and it should remove all the subscriptions
-                                // registered by the client, so the client can also safely clear
-                                // the subscriptions here.
-                                subscriptions.clear();
-                                subscription_requests.clear();
-                                pending_rpc_calls.clear();
-                                rpc_call_timers.clear();
-                                if let Err(err) = client_events_tx.try_broadcast(ClientEvent::Disconnected) {
-                                    error!("Client event `Disconnected` broadcast error: {err}");
-                                }
+                        ConnectionFailed(kind) => {
+                            if let Err(err) = client_events_tx.try_broadcast(ClientEvent::ConnectionFailed(kind)) {
+                                error!("Client event `ConnectionFailed` broadcast error: {err}");
                             }
                         }
-                        next_conn_event = conn_events_rx.next().fuse();
+                        Connected(sender) => {
+                            conn_cmd_sender = Some(sender);
+                            // Check SHV API version
+                            let client_cmd_tx = client_cmd_tx.clone();
+                            let api_version_tx = api_version_tx.clone();
+                            crate::runtime::spawn_task(async move {
+                                let api_version_res = check_shv_api_version(client_cmd_tx)
+                                    .await
+                                    .inspect_err(|e| warn!("check_api_version failed: {e}"));
+                                api_version_tx
+                                    .unbounded_send(api_version_res)
+                                    .unwrap_or_else(|e| warn!("check_api_version send result failed: {e}"));
+                            }).detach();
+                        }
+                        HeartbeatTimeout => {
+                            if let Some(api_version) = &shv_api_version {
+                                let broker_app_path = match api_version {
+                                    ShvApiVersion::V2 => ".broker/app",
+                                    ShvApiVersion::V3 => ".app",
+                                };
+                                let message = RpcMessage::new_request(broker_app_path, METH_PING);
+                                client_cmd_tx
+                                    .send_message(message)
+                                    .unwrap_or_else(|e|
+                                        error!("Cannot send ping through ClientCommand channel: {e}")
+                                    );
+                            } else {
+                                warn!("Unable to send ping, because SHV API version is unknown.");
+                            }
+                        }
+                        Disconnected => {
+                            conn_cmd_sender = None;
+                            // NOTE: When the client is disconnected, the broker also knows that
+                            // (because of heartbeats) and it should remove all the subscriptions
+                            // registered by the client, so the client can also safely clear
+                            // the subscriptions here.
+                            subscriptions.clear();
+                            subscription_requests.clear();
+                            pending_rpc_calls.clear();
+                            rpc_call_timers.clear();
+                            if let Err(err) = client_events_tx.try_broadcast(ClientEvent::Disconnected) {
+                                error!("Client event `Disconnected` broadcast error: {err}");
+                            }
+                        }
                     }
-                    None => {
-                        info!("Connection task terminated, exiting client loop");
-                        return Ok(());
-                    }
+                    next_conn_event = conn_events_rx.next().fuse();
+                } else {
+                    info!("Connection task terminated, exiting client loop");
+                    return Ok(());
                 },
                 api_version_result = api_version_rx.next() => match api_version_result {
                     Some(Ok(api_version)) => {
@@ -547,7 +546,8 @@ impl<V: ClientVariant> Client<V> {
         }
     }
 
-    async fn process_rpc_frame(
+    #[expect(clippy::ref_option, reason = "Better ergonomics with the tuple")]
+    fn process_rpc_frame(
         &self,
         frame: RpcFrame,
         client_cmd_tx: &ClientCommandSender,
@@ -576,7 +576,7 @@ impl<V: ClientVariant> Client<V> {
                             if let Some((mount, path)) = find_longest_path_prefix(&self.mounts, shv_path) {
                                 request_msg.set_shvpath(path);
                                 let node = self.mounts.get(mount).unwrap_or_else(|| panic!("A node on path '{mount}' should exist"));
-                                node.process_request(request_msg, mount.to_owned(), client_cmd_tx.clone()).await;
+                                node.process_request(request_msg, mount.to_owned(), client_cmd_tx.clone());
                             } else {
                                 let method = frame.method().unwrap_or_default();
                                 resp.set_error(RpcError::new(
@@ -593,7 +593,7 @@ impl<V: ClientVariant> Client<V> {
                             };
                             client_cmd_tx.send_message(resp)?;
                         }
-                    };
+                    }
                 } else {
                     warn!("Invalid request frame received.");
                 }
@@ -686,7 +686,7 @@ mod tests {
                 }
             }
 
-            fn emulate_receive_request(&self, request: RpcMessage) {
+            fn emulate_receive_request(&self, request: &RpcMessage) {
                 self.conn_evt_tx.unbounded_send(ConnectionEvent::RpcFrameReceived(request.to_frame().unwrap())).unwrap();
             }
 
@@ -1012,7 +1012,7 @@ mod tests {
 
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx = cli_cmd_tx
@@ -1043,7 +1043,7 @@ mod tests {
                 // The subscription response
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx_1 = cli_cmd_tx
@@ -1164,7 +1164,7 @@ mod tests {
 
                 // Keep the channels in conn_mock alive until the recieve_notification in the
                 // parent task times out.
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx = cli_cmd_tx
@@ -1195,7 +1195,7 @@ mod tests {
                 // The subscription response
                 conn_mock.emulate_receive_response(&subscription_req, ());
 
-                let _ = tx.send(conn_mock);
+                tx.send(conn_mock).ok();
             }).detach();
 
             let mut notify_rx_1 = cli_cmd_tx
@@ -1355,7 +1355,7 @@ mod tests {
 
         }
 
-        async fn recv_request_get_response(conn_mock: &mut ConnectionMock, request: RpcMessage) -> RpcMessage {
+        async fn recv_request_get_response(conn_mock: &mut ConnectionMock, request: &RpcMessage) -> RpcMessage {
             conn_mock.emulate_receive_request(request);
             conn_mock.expect_send_message().await
         }
@@ -1370,25 +1370,25 @@ mod tests {
                 // Nonexisting method or path
                 let mut request = RpcMessage::new_request("dynamic/a", "dir");
                 request.set_access_level(AccessLevel::Read);
-                let response = recv_request_get_response(&mut conn_mock, request).await
+                let response = recv_request_get_response(&mut conn_mock, &request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("dynamic/sync", "bar");
                 request.set_access_level(AccessLevel::Read);
-                let response = recv_request_get_response(&mut conn_mock, request).await
+                let response = recv_request_get_response(&mut conn_mock, &request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("static/none", "dir");
                 request.set_access_level(AccessLevel::Read);
-                let response = recv_request_get_response(&mut conn_mock, request).await
+                let response = recv_request_get_response(&mut conn_mock, &request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("static", "foo");
                 request.set_access_level(AccessLevel::Read);
-                let response = recv_request_get_response(&mut conn_mock, request).await
+                let response = recv_request_get_response(&mut conn_mock, &request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::MethodNotFound.into());
             }
@@ -1396,7 +1396,7 @@ mod tests {
             {
                 // Access level is missing
                 let request = RpcMessage::new_request("dynamic/async", "dir");
-                let response = recv_request_get_response(&mut conn_mock, request).await
+                let response = recv_request_get_response(&mut conn_mock, &request).await
                     .response().expect_err("Response should be Err");
                 assert_eq!(response.code, RpcErrorCode::InvalidRequest.into());
             }
@@ -1405,22 +1405,22 @@ mod tests {
                 // Requests to a valid method with sufficient permissions
                 let mut request = RpcMessage::new_request("static", "get");
                 request.set_access_level(AccessLevel::Read);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_str(), "get");
 
                 let mut request = RpcMessage::new_request("dynamic/sync", "set");
                 request.set_access_level(AccessLevel::Service);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_str(), "set");
 
                 let mut request = RpcMessage::new_request("dynamic/async", "get");
                 request.set_access_level(AccessLevel::Superuser);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_str(), "get");
 
                 let mut request = RpcMessage::new_request("dynamic/async", "dir");
                 request.set_access_level(AccessLevel::Browse);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect("Response should be Ok").success().unwrap().as_list().len(), 4);
             }
 
@@ -1428,17 +1428,17 @@ mod tests {
                 // Insufficient permissions
                 let mut request = RpcMessage::new_request("static", "set");
                 request.set_access_level(AccessLevel::Browse);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("dynamic/sync", "set");
                 request.set_access_level(AccessLevel::Read);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
 
                 let mut request = RpcMessage::new_request("dynamic/async", "get");
                 request.set_access_level(AccessLevel::Browse);
-                let response = recv_request_get_response(&mut conn_mock, request).await;
+                let response = recv_request_get_response(&mut conn_mock, &request).await;
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
             }
         }
@@ -1486,7 +1486,7 @@ mod tests {
 
             #[generics(TestDriverBounds)]
             async fn init_client(test_drv: C, custom_client: Option<Client<Full>>) {
-                let mut client = custom_client.unwrap_or_else(|| Client::new().app(DotAppNode::new("test")));
+                let client = custom_client.unwrap_or_else(|| Client::new().app(DotAppNode::new("test")));
                 let (conn_evt_tx, conn_evt_rx) = futures::channel::mpsc::unbounded::<ConnectionEvent>();
                 let (join_handle_tx, mut join_handle_rx) = futures::channel::mpsc::unbounded();
                 let init_handler = move |cli_cmd_tx, cli_evt_rx| {
@@ -1503,7 +1503,7 @@ mod tests {
 
             #[generics(TestDriverBounds)]
             pub fn run_test(test_drv: C, custom_client: Option<Client<Full>>) {
-                let _ = simple_logger::init_with_level(Level::Debug);
+                simple_logger::init_with_level(log::Level::Debug).ok();
 
                 #[cfg(feature = "tokio")]
                 ::tokio::runtime::Builder::new_multi_thread()

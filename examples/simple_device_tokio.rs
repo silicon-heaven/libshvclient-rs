@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "Fine for a binary")]
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 
@@ -7,7 +8,7 @@ use tokio::sync::RwLock;
 
 use clap::Parser;
 use futures::{select, FutureExt, StreamExt};
-use log::*;
+use log::{info, error, LevelFilter};
 use shvrpc::{client::ClientConfig, util::parse_log_verbosity};
 use shvrpc::{RpcMessage, RpcMessageMetaTags as _};
 use shvclient::clientnode::{err_unresolved_request, Method, RequestHandlerResult, METH_GET, METH_SET, PROPERTY_METHODS, SIG_CHNG};
@@ -58,14 +59,14 @@ fn init_logger(cli_opts: &Opts) {
             }
         }
     }
-    logger.init().unwrap();
+    logger.init().expect("Logger must work");
 }
 
 fn load_client_config(cli_opts: Opts) -> shvrpc::Result<ClientConfig> {
     let mut config = if let Some(config_file) = &cli_opts.config {
         ClientConfig::from_file_or_default(config_file, cli_opts.create_default_config)?
     } else {
-        Default::default()
+        ClientConfig::default()
     };
     config.url = match &cli_opts.url {
         Some(url_str) => Url::parse(url_str)?,
@@ -154,7 +155,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         }
     };
 
-    async fn dyn_request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender, counter: Arc<RwLock<i32>>) -> RequestHandlerResult {
+    fn dyn_request_handler(rq: RpcMessage, _client_cmd_tx: ClientCommandSender, counter: Arc<RwLock<i32>>) -> RequestHandlerResult {
         let shv_path = rq.shv_path().unwrap_or_default();
 
         if shv_path.is_empty() {
@@ -308,7 +309,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
         .mount_dynamic("status/dyn", move |rq, client_cmd_tx| {
             let counter = counter.clone();
             async move {
-                dyn_request_handler(rq, client_cmd_tx, counter).await
+                dyn_request_handler(rq, client_cmd_tx, counter)
             }
         })
         .run_with_init(&client_config, app_tasks)

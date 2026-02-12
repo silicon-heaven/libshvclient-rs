@@ -23,7 +23,7 @@ async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     shvclient::runtime::spawn_task(async {
         run_broker(Arc::new(BrokerImpl::new(broker_config, access_config, sender, None)), reciever)
             .await
-            .expect("broker accept_loop failed")
+            .expect("broker accept_loop failed");
     }).detach();
     // Wait for the broker
     let start = std::time::Instant::now();
@@ -41,10 +41,10 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
     let ca_crt_path = ca_crt_path.into();
     shvclient::runtime::spawn_task(async move {
         let client_config = ClientConfig {
-            url: Url::parse(&format!("ssl://admin:admin@{BROKER_ADDRESS}?ca={ca_crt_path}")).unwrap(),
+            url: Url::parse(&format!("ssl://admin:admin@{BROKER_ADDRESS}?ca={ca_crt_path}")).expect("Url must be correct"),
             device_id: None,
             mount: None,
-            heartbeat_interval: Duration::from_secs(60),
+            heartbeat_interval: Duration::from_mins(1),
             reconnect_interval: None,
         };
         shvclient::client::Client::new_plain()
@@ -53,7 +53,7 @@ async fn start_client(ca_crt_path: impl Into<String>) -> Option<(ClientCommandSe
                     .unwrap_or_else(|(commands_tx, _)| {
                         warn!("Client channels dropped before handed to the caller. Terminating the client");
                         commands_tx.terminate_client();
-                    })
+                    });
             })
             .await
             .unwrap_or_else(|e| error!("Client finished with error: {e}"));
@@ -109,7 +109,7 @@ fn generate_test_cert_files() -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
 fn create_broker_config(cert: &str, key: &str) -> BrokerConfig {
     BrokerConfig {
         listen: vec![
-            Listen { url: Url::parse(&format!("ssl://{BROKER_ADDRESS}?cert={cert}&key={key}")).unwrap() },
+            Listen { url: Url::parse(&format!("ssl://{BROKER_ADDRESS}?cert={cert}&key={key}")).expect("Url must be correct") },
         ],
         ..Default::default()
     }
@@ -138,8 +138,8 @@ fn ssl() {
             .await {
             Ok(Ok(ClientEvent::Connected(..))) => { },
             Ok(_) => panic!("Client connection to broker error"),
-            Err(_) => panic!("Client connection to broker timed out"),
-        };
+            Err(err) => panic!("Client connection to broker timed out: {err}"),
+        }
 
         let res = RpcCallDirList::new(".app")
             .timeout(Duration::from_secs(3))
