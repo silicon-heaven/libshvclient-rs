@@ -12,7 +12,7 @@ use shvrpc::client::LoginParams;
 use shvrpc::framerw::{FrameReader, FrameWriter, ReceiveFrameError};
 use shvrpc::rpcframe::RpcFrame;
 use shvrpc::rpcmessage::{RpcError, RpcErrorCode};
-use shvrpc::util::login_from_url;
+use shvrpc::util::parse_query_params;
 use shvrpc::{client, RpcMessage, RpcMessageMetaTags};
 use futures::AsyncReadExt;
 use futures_rustls::rustls::ClientConfig as TlsClientConfig;
@@ -157,7 +157,7 @@ async fn connection_loop(
     info!("Connected OK");
 
     // login
-    let (user, password) = login_from_url(&config.url);
+    let shvrpc::util::LoginQueryParams { user, password, .. } = parse_query_params(&config.url);
     let heartbeat_interval = config.heartbeat_interval;
     // The read timeout can be related to the heartbeat interval given that the interval is
     // significantly larger than roundtrip time. The client has to receive at least a response
