@@ -1,0 +1,30 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  id-token: write
+
+jobs:
+  upload-crates-io:
+    name: Publish crates on crates.io
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Get authentization token
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish crates
+        run: |
+          # cargo publish does a verify-build, so we need to enable at least one of our features.
+          # The feature doesn't actually alter what's being published.
+          cargo publish --features smol
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

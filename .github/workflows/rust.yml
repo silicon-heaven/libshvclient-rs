@@ -124,18 +124,3 @@ jobs:
         uses: rickstaa/action-create-tag@v1
         with:
           tag: ${{ steps.get-version.outputs.version }}
-
-  upload-crates-io:
-    name: Publish crates on crates.io
-    if: github.ref == 'refs/heads/main'
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - run: |
-          cargo login <<< "${{secrets.CRATES_IO_TOKEN}}"
-          # cargo publish does a verify-build, so we need to enable at least one of our features.
-          # The feature doesn't actually alter what's being published.
-          cargo publish --features smol
