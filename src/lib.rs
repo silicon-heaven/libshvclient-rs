@@ -31,3 +31,5 @@ pub use shvrpc;
 pub use connection::ConnectionEvent;
 #[cfg(feature = "mocking")]
 pub use connection::ConnectionCommand;
+#[cfg(feature = "mocking")]
+pub mod mocking;
