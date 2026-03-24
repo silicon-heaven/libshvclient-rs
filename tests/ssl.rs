@@ -10,7 +10,7 @@ use shvbroker::config::{BrokerConfig, Listen};
 use shvclient::clientapi::{RpcCallDirExists, RpcCallDirList};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
 use shvrpc::client::ClientConfig;
-use smol::channel::unbounded;
+use futures::channel::mpsc::unbounded;
 use tempfile::TempDir;
 use url::Url;
 
