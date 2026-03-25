@@ -3,7 +3,7 @@ name = "shvclient"
 description = "A Rust framework for Silicon Heaven RPC devices"
 license = "MIT"
 repository = "https://github.com/silicon-heaven/libshvclient-rs"
-version = "4.2.0"
+version = "5.0.0"
 edition = "2024"
 
 [lib]
@@ -55,6 +55,8 @@ futures-rustls = "0.26.0"
 rustls-pemfile = "2.2.0"
 rustls-platform-verifier = "0.6.1"
 async-trait = "0.1.89"
+futures-timer = "3.0.3"
+event-listener = { version = "5.4.1", optional = true }
 
 # For local development
 # [patch.crates-io]
@@ -65,7 +67,7 @@ async-trait = "0.1.89"
 default = []
 tokio = ["dep:tokio", "dep:tokio-util"]
 smol = ["dep:smol"]
-mocking = []
+mocking = ["dep:event-listener"]
 
 [lints.clippy]
 pedantic = {priority = -1, level = "warn"}
