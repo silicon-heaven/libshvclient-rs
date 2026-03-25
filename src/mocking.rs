@@ -18,11 +18,11 @@ impl PendingResponse<'_> {
         match expected_result {
             Ok(expected_result) => {
                 let result = response.expect("Expected a success response");
-                assert_eq!(*result, RpcValue::from_cpon(expected_result).unwrap_or_else(|err| panic!("Invalid CPON '{expected_result}': {err}")));
+                assert_eq!(*result, RpcValue::from_cpon(expected_result).unwrap_or_else(|err| panic!("Invalid CPON '{expected_result}': {err}")), "Unexpected value of the result");
             },
             Err(err) => {
                 let result = response.expect_err("Expected an Err response");
-                assert_eq!(result.to_string(), err);
+                assert_eq!(result.to_string(), err, "Unexpected value of the result");
             },
         }
     }
