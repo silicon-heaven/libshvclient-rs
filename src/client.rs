@@ -249,7 +249,7 @@ impl<V: ClientVariant> Client<V> {
 
     #[cfg(feature = "mocking")]
     async fn mock_run_with_init_opt<H>(
-        &mut self,
+        &self,
         init_handler: Option<H>,
         conn_evt_rx: futures::channel::mpsc::UnboundedReceiver::<ConnectionEvent>,
     ) -> shvrpc::Result<()>
@@ -261,7 +261,7 @@ impl<V: ClientVariant> Client<V> {
 
     #[cfg(feature = "mocking")]
     pub async fn mock_run_with_init<H>(
-        mut self,
+        self,
         handler: H,
         channel: futures::channel::mpsc::UnboundedReceiver::<ConnectionEvent>
     ) -> shvrpc::Result<()>

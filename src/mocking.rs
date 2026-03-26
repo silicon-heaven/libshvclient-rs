@@ -18,11 +18,11 @@ impl PendingResponse<'_> {
         match expected_result {
             Ok(expected_result) => {
                 let result = response.expect("Expected a success response");
-                assert_eq!(*result, RpcValue::from_cpon(expected_result).unwrap_or_else(|err| panic!("Invalid CPON '{expected_result}': {err}")));
+                assert_eq!(*result, RpcValue::from_cpon(expected_result).unwrap_or_else(|err| panic!("Invalid CPON '{expected_result}': {err}")), "Unexpected value of the result");
             },
             Err(err) => {
                 let result = response.expect_err("Expected an Err response");
-                assert_eq!(result.to_string(), err);
+                assert_eq!(result.to_string(), err, "Unexpected value of the result");
             },
         }
     }
@@ -44,6 +44,27 @@ impl PendingRequest {
             },
         }
         self.1.unbounded_send(ConnectionEvent::RpcFrameReceived(self.0.to_frame().expect("to_frame() must work"))).expect("sending ConnectionEvent must work");
+    }
+}
+
+pub trait ParamMatcher {
+    fn matches(&self, actual: &RpcValue) -> bool;
+}
+
+impl ParamMatcher for &str {
+    fn matches(&self, actual: &RpcValue) -> bool {
+        let expected = RpcValue::from_cpon(self)
+            .unwrap_or_else(|err| panic!("Invalid CPON '{self}': {err}"));
+        actual == &expected
+    }
+}
+
+impl<F> ParamMatcher for F
+where
+    F: Fn(&RpcValue) -> bool
+{
+    fn matches(&self, actual: &RpcValue) -> bool {
+        self(actual)
     }
 }
 
@@ -99,10 +120,13 @@ impl TestApp {
         self.conn_evt_tx.unbounded_send(ConnectionEvent::RpcFrameReceived(rpc_message.to_frame().expect("to_frame must work"))).expect("events must work");
     }
 
-    pub async fn await_signal(&self, expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>, expected_param: &str) {
+    pub async fn await_signal(
+        &self,
+        expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>,
+        expected_param: impl ParamMatcher,
+    ) {
         let expected_ri = expected_ri.try_into().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
         let expected_signal = expected_ri.signal().unwrap_or_else(|| panic!("Signal RI must have a signal: {expected_ri}"));
-        let expected_param = RpcValue::from_cpon(expected_param).unwrap_or_else(|err| panic!("Invalid CPON '{expected_param}': {err}"));
 
         self.await_and_remove(|rpc_message| {
             if !rpc_message.is_signal() {
@@ -111,13 +135,19 @@ impl TestApp {
             let shv_path = rpc_message.shv_path().expect("msg must have a path");
             let method = rpc_message.method().expect("msg must have a method");
             let param = rpc_message.param().cloned().unwrap_or_else(RpcValue::null);
-            shv_path == expected_ri.path() && method == expected_signal && param == expected_param
+
+            shv_path == expected_ri.path() &&
+                method == expected_signal &&
+                expected_param.matches(&param)
         }).await;
     }
 
-    pub async fn await_request(&self, expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>, expected_param: &str) -> PendingRequest {
+    pub async fn await_request(
+        &self,
+        expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>,
+        expected_param: impl ParamMatcher,
+    ) -> PendingRequest {
         let expected_ri = expected_ri.try_into().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
-        let expected_param = RpcValue::from_cpon(expected_param).unwrap_or_else(|err| panic!("Invalid CPON '{expected_param}': {err}"));
 
         let rpc_message = self.await_and_remove(|rpc_message| {
             if !rpc_message.is_request() {
@@ -126,16 +156,22 @@ impl TestApp {
             let shv_path = rpc_message.shv_path().expect("msg must have a path");
             let method = rpc_message.method().expect("msg must have a method");
             let param = rpc_message.param().cloned().unwrap_or_else(RpcValue::null);
-            shv_path == expected_ri.path() && method == expected_ri.method() && param == expected_param
+
+            shv_path == expected_ri.path() &&
+                method == expected_ri.method() &&
+                expected_param.matches(&param)
         }).await;
 
-        PendingRequest(rpc_message.prepare_response().expect("prepare_response must work"), self.conn_evt_tx.clone())
+        PendingRequest(
+            rpc_message.prepare_response().expect("prepare_response must work"),
+            self.conn_evt_tx.clone()
+        )
     }
 
     pub async fn await_subscription(&self, expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>) {
         let expected_ri = expected_ri.try_into().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
         let expected_ri = expected_ri.as_str();
-        self.await_request(".broker/currentClient:subscribe", &format!(r#"["{expected_ri}",null]""#)).await
+        self.await_request(".broker/currentClient:subscribe", format!(r#"["{expected_ri}",null]""#).as_str()).await
             .respond(Ok("true"));
     }
 
