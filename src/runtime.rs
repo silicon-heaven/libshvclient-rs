@@ -1,12 +1,29 @@
+
 #[must_use = "Task has to be used. If you want to detach the task, call .detach() on it."]
-pub struct TaskHandle<F: futures::Future + Send + 'static>(
+pub struct TaskHandle<O: Send + 'static>(
+// pub struct TaskHandle<F: futures::Future + Send + 'static>(
     #[cfg(feature = "tokio")]
-    pub tokio::task::JoinHandle<F::Output>,
+    pub tokio::task::JoinHandle<O>,
     #[cfg(feature = "smol")]
-    pub smol::Task<F::Output>,
+    // The error type is dummy as smol::Task future resolves to the result right away,
+    // but we want to keep the same API with tokio JoinHandle, which returns a Result.
+    pub smol::Task<Result<O, std::convert::Infallible>>,
 );
 
-impl<F: futures::Future + Send + 'static> TaskHandle<F> {
+impl<O: Send + 'static> Future for TaskHandle<O> {
+    #[cfg(feature = "tokio")]
+    type Output = Result<O, tokio::task::JoinError>;
+
+    #[cfg(feature = "smol")]
+    type Output = Result<O, std::convert::Infallible>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+// impl<F: futures::Future + Send + 'static> TaskHandle<F> {
+impl<O: Send + 'static> TaskHandle<O> {
     #[cfg(feature = "tokio")]
     #[expect(clippy::unused_async, reason = "We want the same API as with smol")]
     pub async fn cancel(self) {
@@ -24,7 +41,7 @@ impl<F: futures::Future + Send + 'static> TaskHandle<F> {
     }
 }
 
-pub fn spawn_task<F>(f: F) -> TaskHandle<F>
+pub fn spawn_task<F>(f: F) -> TaskHandle<F::Output>
 where
     F: futures::Future + Send + 'static,
     F::Output: Send + 'static,
@@ -32,7 +49,8 @@ where
     #[cfg(feature = "tokio")]
     { TaskHandle(tokio::spawn(f)) }
     #[cfg(feature = "smol")]
-    { TaskHandle(smol::spawn(f)) }
+    { TaskHandle(smol::spawn(async move { Ok(f.await) } )) }
+
 }
 
 pub fn block_on<T>(future: impl Future<Output = T>) -> T {
