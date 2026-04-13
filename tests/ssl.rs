@@ -5,7 +5,7 @@ use std::time::Duration;
 use futures_time::future::FutureExt;
 use log::{error, info, warn};
 use rcgen::{BasicConstraints, CertificateParams, DnType, DnValue, IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType, PKCS_ECDSA_P256_SHA256};
-use shvbroker::brokerimpl::{run_broker, BrokerImpl};
+use shvbroker::brokerimpl::{BrokerImpl, LastLogin, run_broker};
 use shvbroker::config::{BrokerConfig, Listen};
 use shvclient::clientapi::{RpcCallDirExists, RpcCallDirList};
 use shvclient::{ClientCommandSender, ClientEvent, ClientEventsReceiver};
@@ -21,7 +21,7 @@ async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     let broker_config = Arc::new(broker_config);
     let (sender, reciever) = unbounded();
     shvclient::runtime::spawn_task(async {
-        run_broker(Arc::new(BrokerImpl::new(broker_config, access_config, sender, None)), reciever)
+        run_broker(Arc::new(BrokerImpl::new(broker_config, access_config, LastLogin::default(), sender, None)), reciever)
             .await
             .expect("broker accept_loop failed");
     }).detach();
