@@ -21,7 +21,7 @@ async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     let broker_config = Arc::new(broker_config);
     let (sender, reciever) = unbounded();
     shvclient::runtime::spawn_task(async {
-        run_broker(Arc::new(BrokerImpl::new(broker_config, access_config, LastLogin::default(), sender, None)), reciever)
+        run_broker(BrokerImpl::new(broker_config, access_config, LastLogin::default(), sender, None), reciever)
             .await
             .expect("broker accept_loop failed");
     }).detach();
