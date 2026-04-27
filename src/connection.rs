@@ -235,13 +235,13 @@ async fn connection_loop(
                                 // Reset heartbeat timer only for request frames, that is where we can expect a response.
                                 if message.is_request() {
                                     fut_heartbeat_timeout = futures_time::task::sleep(heartbeat_interval.into()).fuse();
-                                    if let Err(err) = writer_tx.unbounded_send(message) {
-                                        warn!("Cannot send message to the writer task: {err}");
-                                        conn_event_sender
-                                            .unbounded_send(ConnectionEvent::Disconnected)
-                                            .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
-                                        return ConnectionLoopResult::ConnectionClosed;
-                                    }
+                                }
+                                if let Err(err) = writer_tx.unbounded_send(message) {
+                                    warn!("Cannot send message to the writer task: {err}");
+                                    conn_event_sender
+                                        .unbounded_send(ConnectionEvent::Disconnected)
+                                        .unwrap_or_else(|e| debug!("ConnectionEvent::Disconnected send failed: {e}"));
+                                    return ConnectionLoopResult::ConnectionClosed;
                                 }
                             },
                         }
