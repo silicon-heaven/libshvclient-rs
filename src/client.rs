@@ -601,30 +601,42 @@ impl<V: ClientVariant> Client<V> {
                 warn!("Invalid shv request");
             }
         } else if frame.is_response() {
-            if let (Some(req_id), Ok(rpcmsg)) = (frame.request_id(), frame.to_rpcmesage()) {
-                let frame_sender = if rpcmsg.is_delay() {
-                    // Update the RPC call timer
-                    pending_rpc_calls
-                        .get(&req_id)
-                        .map(|(frame_sender, timer_updater)| {
-                            timer_updater.unbounded_send(()).unwrap_or_default();
-                            frame_sender.clone()
-                        })
-                } else {
-                    pending_rpc_calls
-                        .remove(&req_id)
-                        .map(|(frame_sender, _)| frame_sender)
-                };
+            if let Some(req_id) = frame.request_id() {
+                match frame.to_rpcmesage() {
+                    Ok(rpcmsg) => {
+                        let frame_sender = if rpcmsg.is_delay() {
+                            // Update the RPC call timer
+                            pending_rpc_calls
+                                .get(&req_id)
+                                .map(|(frame_sender, timer_updater)| {
+                                    timer_updater.unbounded_send(()).unwrap_or_default();
+                                    frame_sender.clone()
+                                })
+                        } else {
+                            pending_rpc_calls
+                                .remove(&req_id)
+                                .map(|(frame_sender, _)| frame_sender)
+                        };
 
-                if let Some(frame_sender) = frame_sender {
-                    frame_sender
-                        .unbounded_send(frame)
-                        .unwrap_or_default();
-                } else if let Some(subscr_id) = subscription_requests.remove(&req_id)
-                    && let Some(subscr) = subscriptions.0.iter_mut().find(|s| s.subscr_id == subscr_id) {
-                        send_subscription_frame(subscr, frame);
-                        subscr.confirmed = true;
+                        if let Some(frame_sender) = frame_sender {
+                            frame_sender
+                                .unbounded_send(frame)
+                                .unwrap_or_default();
+                            } else if let Some(subscr_id) = subscription_requests.remove(&req_id)
+                                && let Some(subscr) = subscriptions.0.iter_mut().find(|s| s.subscr_id == subscr_id) {
+                                    send_subscription_frame(subscr, frame);
+                                    subscr.confirmed = true;
+                            }
                     }
+                    Err(err) => {
+                        let mut resp = RpcMessage::from_meta(frame.meta);
+                        resp.set_error(RpcError::new(
+                                RpcErrorCode::ParseError,
+                                format!("Received invalid response to request with id {req_id}: {err}"),
+                        ));
+                        client_cmd_tx.send_message(resp)?;
+                    }
+                }
             }
         } else if frame.is_signal()
             && let (Some(path), source, signal) = (frame.shv_path(), frame.source(), frame.method())
