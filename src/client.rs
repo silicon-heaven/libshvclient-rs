@@ -561,7 +561,7 @@ impl<V: ClientVariant> Client<V> {
             if subscr.sender.unbounded_send(frame).is_err() {
                 warn!(
                     "Notification channel for RI `{}`, id `{}` closed while the subscription is still active",
-                    &subscr.glob.as_ri(), subscr.subscr_id
+                    subscr.glob.as_ri(), subscr.subscr_id
                 );
             }
         }
@@ -916,7 +916,7 @@ mod tests {
         ) {
             let received_msg = receive_notification(notify_rx)
                 .timeout(Duration::from_millis(3000)).await
-                .unwrap_or_else(|_| panic!("Notification for path `{:?}`, signal `{:?}`, param `{:?}` not received", &path, &method, &param));
+                .unwrap_or_else(|_| panic!("Notification for path `{path:?}`, signal `{method:?}`, param `{param:?}` not received"));
             assert!(received_msg.is_signal());
             assert_eq!(received_msg.shv_path(), path);
             assert_eq!(received_msg.method(), method);

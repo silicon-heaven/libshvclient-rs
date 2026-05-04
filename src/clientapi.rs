@@ -73,7 +73,7 @@ impl Drop for Subscriber {
 
         if let Err(err) = self.client_cmd_tx.unbounded_send(
             ClientCommand::Unsubscribe { subscription_id: self.subscription_id, }) {
-            warn!("Cannot unsubscribe `{}`: {err}", &self.ri);
+            warn!("Cannot unsubscribe `{}`: {err}", self.ri);
         }
     }
 }
