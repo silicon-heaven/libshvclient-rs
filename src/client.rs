@@ -658,8 +658,8 @@ impl<V: ClientVariant> Client<V> {
 
 #[cfg(test)]
 mod tests {
-    pub use super::*;
-    pub use crate::clientapi::*;
+    use super::*;
+    use crate::clientapi::*;
     use futures::Future;
     use generics_alias::*;
 
