@@ -7,7 +7,7 @@ use shvproto::RpcValue;
 use shvrpc::rpc::ShvRI;
 use shvrpc::rpcdiscovery::{DirParam, DirResult, LsParam, LsResult, MethodInfo};
 use shvrpc::rpcmessage::RpcError;
-use shvrpc::{RpcFrame, RpcMessage};
+use shvrpc::{RpcFrame, RpcMessage, RpcMessageMetaTags};
 
 use private::next_subscription_id;
 
@@ -171,39 +171,45 @@ impl ClientCommandSender {
         method: impl AsRef<str>,
         param: Option<RpcValue>,
         timeout: Option<Duration>,
+        user_id: Option<String>,
     ) -> Result<Receiver<RpcFrame>, futures::channel::mpsc::TrySendError<ClientCommand>>
     {
+        let mut request = RpcMessage::new_request(shvpath, method).with_param(param);
+        if let Some(user_id) = user_id {
+            request.set_user_id(user_id);
+        }
+
         let (response_sender, response_receiver) = futures::channel::mpsc::unbounded();
         self.sender.unbounded_send(ClientCommand::RpcCall {
-            request: RpcMessage::new_request(shvpath, method).with_param(param),
+            request,
             response_sender,
             timeout,
         })
         .map(|()| response_receiver)
     }
 
-    pub async fn call_dir(&self, path: &str, param: DirParam, timeout: Option<Duration>) -> Result<DirResult, CallRpcMethodError> {
-        self.call_dir_into(path, param, timeout).await
+    pub async fn call_dir(&self, path: &str, param: DirParam, timeout: Option<Duration>, user_id: Option<String>) -> Result<DirResult, CallRpcMethodError> {
+        self.call_dir_into(path, param, timeout, user_id).await
     }
 
-    pub async fn call_dir_brief(&self, path: &str, timeout: Option<Duration>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
-        self.call_dir_into(path, DirParam::Brief, timeout).await
+    pub async fn call_dir_brief(&self, path: &str, timeout: Option<Duration>, user_id: Option<String>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+        self.call_dir_into(path, DirParam::Brief, timeout, user_id).await
     }
 
-    pub async fn call_dir_full(&self, path: &str, timeout: Option<Duration>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
-        self.call_dir_into(path, DirParam::Full, timeout).await
+    pub async fn call_dir_full(&self, path: &str, timeout: Option<Duration>, user_id: Option<String>) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
+        self.call_dir_into(path, DirParam::Full, timeout, user_id).await
     }
 
-    pub async fn call_dir_exists(&self, path: &str, method: &str, timeout: Option<Duration>) -> Result<bool, CallRpcMethodError> {
-        self.call_dir_into(path, DirParam::Exists(method.into()), timeout).await
+    pub async fn call_dir_exists(&self, path: &str, method: &str, timeout: Option<Duration>, user_id: Option<String>) -> Result<bool, CallRpcMethodError> {
+        self.call_dir_into(path, DirParam::Exists(method.into()), timeout, user_id).await
     }
 
-    async fn call_dir_into<R, E>(&self, path: &str, param: DirParam, timeout: Option<Duration>) -> Result<R, CallRpcMethodError>
+    async fn call_dir_into<R, E>(&self, path: &str, param: DirParam, timeout: Option<Duration>, user_id: Option<String>) -> Result<R, CallRpcMethodError>
     where
         R: TryFrom<DirResult, Error = E>,
         E: std::fmt::Display,
     {
-        self.call_rpc_method(path, METH_DIR, Some(RpcValue::from(param)), timeout, None::<fn(_)>)
+        self.call_rpc_method(path, METH_DIR, Some(RpcValue::from(param)), timeout, user_id, None::<fn(_)>)
             .await
             .and_then(|dir_res|
                 R::try_from(dir_res).map_err(|e|
@@ -216,24 +222,24 @@ impl ClientCommandSender {
             )
     }
 
-    pub async fn call_ls(&self, path: &str, param: LsParam, timeout: Option<Duration>) -> Result<LsResult, CallRpcMethodError> {
-        self.call_ls_into(path, param, timeout).await
+    pub async fn call_ls(&self, path: &str, param: LsParam, timeout: Option<Duration>, user_id: Option<String>) -> Result<LsResult, CallRpcMethodError> {
+        self.call_ls_into(path, param, timeout, user_id).await
     }
 
-    pub async fn call_ls_exists(&self, path: &str, dirname: &str, timeout: Option<Duration>) -> Result<bool, CallRpcMethodError> {
-        self.call_ls_into(path, LsParam::Exists(dirname.into()), timeout).await
+    pub async fn call_ls_exists(&self, path: &str, dirname: &str, timeout: Option<Duration>, user_id: Option<String>) -> Result<bool, CallRpcMethodError> {
+        self.call_ls_into(path, LsParam::Exists(dirname.into()), timeout, user_id).await
     }
 
-    pub async fn call_ls_list(&self, path: &str, timeout: Option<Duration>) -> Result<Vec<String>, CallRpcMethodError> {
-        self.call_ls_into(path, LsParam::List, timeout).await
+    pub async fn call_ls_list(&self, path: &str, timeout: Option<Duration>, user_id: Option<String>) -> Result<Vec<String>, CallRpcMethodError> {
+        self.call_ls_into(path, LsParam::List, timeout, user_id).await
     }
 
-    async fn call_ls_into<R, E>(&self, path: &str, param: LsParam, timeout: Option<Duration>) -> Result<R, CallRpcMethodError>
+    async fn call_ls_into<R, E>(&self, path: &str, param: LsParam, timeout: Option<Duration>, user_id: Option<String>) -> Result<R, CallRpcMethodError>
     where
         R: TryFrom<LsResult, Error = E>,
         E: std::fmt::Display,
     {
-        self.call_rpc_method(path, METH_LS, Some(RpcValue::from(param)), timeout, None::<fn(_)>)
+        self.call_rpc_method(path, METH_LS, Some(RpcValue::from(param)), timeout, user_id, None::<fn(_)>)
             .await
             .and_then(|ls_res|
                 R::try_from(ls_res).map_err(|e|
@@ -252,6 +258,7 @@ impl ClientCommandSender {
         method: impl AsRef<str>,
         param: Option<RpcValue>,
         timeout: Option<Duration>,
+        user_id: Option<String>,
     ) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
     where
         R: for<'a> TryFrom<&'a RpcValue, Error = E> + Send + 'static,
@@ -271,7 +278,7 @@ impl ClientCommandSender {
         if self.sender.is_closed() {
             return Box::pin(futures::stream::empty());
         }
-        let call = self.do_rpc_call(path, method, param, timeout)
+        let call = self.do_rpc_call(path, method, param, timeout, user_id)
             .map_err(|err| {
                 warn!("Cannot send RPC request to the client core. \
                     Path: `{path}`, method: `{method}`, error: {err}");
@@ -308,6 +315,7 @@ impl ClientCommandSender {
         method: impl AsRef<str>,
         param: Option<RpcValue>,
         timeout: Option<Duration>,
+        user_id: Option<String>,
         progress_notifier: Option<F>,
     ) -> Result<R, CallRpcMethodError>
     where
@@ -318,7 +326,7 @@ impl ClientCommandSender {
         let path = path.as_ref();
         let method = method.as_ref();
 
-        let mut receiver = self.call_rpc_method_stream(path, method, param, timeout);
+        let mut receiver = self.call_rpc_method_stream(path, method, param, timeout, user_id);
         while let Some(result) = receiver.next().await {
             match result? {
                 RpcCallResponse::Delay(progress) => {
@@ -410,11 +418,12 @@ pub struct RpcCall<'a> {
     method: &'a str,
     param: Option<RpcValue>,
     timeout: Option<Duration>,
+    user_id: Option<String>,
 }
 
 impl<'a> RpcCall<'a> {
     pub fn new(path: &'a str, method: &'a str) -> Self {
-        Self { path, method, param: None, timeout: None }
+        Self { path, method, param: None, timeout: None, user_id: None }
     }
 
     #[must_use]
@@ -429,12 +438,18 @@ impl<'a> RpcCall<'a> {
         self
     }
 
+    #[must_use]
+    pub fn user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
     pub async fn exec<R, E>(self, client_cmd_sender: &ClientCommandSender) -> Result<R, CallRpcMethodError>
     where
         R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
-        client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, None::<fn(_)>).await
+        client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, self.user_id, None::<fn(_)>).await
     }
 
     pub async fn exec_with_progress<R, E>(self, client_cmd_sender: &ClientCommandSender, progress_notifier: impl Fn(f64) + Send + 'static) -> Result<R, CallRpcMethodError>
@@ -442,7 +457,7 @@ impl<'a> RpcCall<'a> {
         R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
-        client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, Some(progress_notifier)).await
+        client_cmd_sender.call_rpc_method(self.path, self.method, self.param, self.timeout, self.user_id, Some(progress_notifier)).await
     }
 
     pub fn stream<R, E>(self, client_cmd_sender: &ClientCommandSender) -> Pin<Box<dyn Stream<Item = Result<RpcCallResponse<R>, CallRpcMethodError>> + Send>>
@@ -450,7 +465,7 @@ impl<'a> RpcCall<'a> {
         R: for<'r> TryFrom<&'r RpcValue, Error = E> + Send + 'static,
         E: std::fmt::Display,
     {
-        client_cmd_sender.call_rpc_method_stream(self.path, self.method, self.param, self.timeout)
+        client_cmd_sender.call_rpc_method_stream(self.path, self.method, self.param, self.timeout, self.user_id)
     }
 
 }
@@ -459,11 +474,12 @@ impl<'a> RpcCall<'a> {
 pub struct RpcCallLsList<'a> {
     path: &'a str,
     timeout: Option<Duration>,
+    user_id: Option<String>,
 }
 
 impl<'a> RpcCallLsList<'a> {
     pub fn new(path: &'a str) -> Self {
-        Self { path, timeout: None }
+        Self { path, timeout: None, user_id: None }
     }
 
     #[must_use]
@@ -472,8 +488,14 @@ impl<'a> RpcCallLsList<'a> {
         self
     }
 
+    #[must_use]
+    pub fn user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
     pub async fn exec(self, client_cmd_sender: &ClientCommandSender) -> Result<Vec<String>, CallRpcMethodError> {
-        client_cmd_sender.call_ls_list(self.path, self.timeout).await
+        client_cmd_sender.call_ls_list(self.path, self.timeout, self.user_id).await
     }
 }
 
@@ -482,11 +504,12 @@ pub struct RpcCallLsExists<'a> {
     path: &'a str,
     dirname: &'a str,
     timeout: Option<Duration>,
+    user_id: Option<String>,
 }
 
 impl<'a> RpcCallLsExists<'a> {
     pub fn new(path: &'a str, dirname: &'a str) -> Self {
-        Self { path, dirname, timeout: None }
+        Self { path, dirname, timeout: None, user_id: None }
     }
 
     #[must_use]
@@ -495,8 +518,14 @@ impl<'a> RpcCallLsExists<'a> {
         self
     }
 
+    #[must_use]
+    pub fn user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
     pub async fn exec(self, client_cmd_sender: &ClientCommandSender) -> Result<bool, CallRpcMethodError> {
-        client_cmd_sender.call_ls_exists(self.path, self.dirname, self.timeout).await
+        client_cmd_sender.call_ls_exists(self.path, self.dirname, self.timeout, self.user_id).await
     }
 }
 
@@ -504,11 +533,12 @@ impl<'a> RpcCallLsExists<'a> {
 pub struct RpcCallDirList<'a> {
     path: &'a str,
     timeout: Option<Duration>,
+    user_id: Option<String>,
 }
 
 impl<'a> RpcCallDirList<'a> {
     pub fn new(path: &'a str) -> Self {
-        Self { path, timeout: None }
+        Self { path, timeout: None, user_id: None }
     }
 
     #[must_use]
@@ -517,12 +547,18 @@ impl<'a> RpcCallDirList<'a> {
         self
     }
 
+    #[must_use]
+    pub fn user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
     pub async fn exec_brief(self, client_cmd_sender: &ClientCommandSender) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
-        client_cmd_sender.call_dir_brief(self.path, self.timeout).await
+        client_cmd_sender.call_dir_brief(self.path, self.timeout, self.user_id).await
     }
 
     pub async fn exec_full(self, client_cmd_sender: &ClientCommandSender) -> Result<Vec<MethodInfo>, CallRpcMethodError> {
-        client_cmd_sender.call_dir_full(self.path, self.timeout).await
+        client_cmd_sender.call_dir_full(self.path, self.timeout, self.user_id).await
     }
 }
 
@@ -531,11 +567,12 @@ pub struct RpcCallDirExists<'a> {
     path: &'a str,
     method: &'a str,
     timeout: Option<Duration>,
+    user_id: Option<String>,
 }
 
 impl<'a> RpcCallDirExists<'a> {
     pub fn new(path: &'a str, method: &'a str) -> Self {
-        Self { path, method, timeout: None }
+        Self { path, method, timeout: None, user_id: None }
     }
 
     #[must_use]
@@ -544,8 +581,14 @@ impl<'a> RpcCallDirExists<'a> {
         self
     }
 
+    #[must_use]
+    pub fn user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
     pub async fn exec(self, client_cmd_sender: &ClientCommandSender) -> Result<bool, CallRpcMethodError> {
-        client_cmd_sender.call_dir_exists(self.path, self.method, self.timeout).await
+        client_cmd_sender.call_dir_exists(self.path, self.method, self.timeout, self.user_id).await
     }
 }
 
