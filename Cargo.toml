@@ -36,7 +36,7 @@ anyhow = "1.0.100"
 
 [dependencies]
 shvproto = "6.0.1"
-shvrpc = "15.0"
+shvrpc = "16.0"
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
