@@ -217,7 +217,7 @@ pub(crate) async fn main() -> shvrpc::Result<()> {
                 Some(Ok(param.into()))
             }
             "setVecString" [IsSetter, Write, "List", ""] (param: Vec<String>) => {
-                println!("param data: {:?}", &param);
+                println!("param data: {param:?}");
                 Some(Ok(().into()))
             }
             "42" [IsGetter, Browse, "", ""] => {
