@@ -825,7 +825,7 @@ mod tests {
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
             let mut resp_rx = cli_cmd_tx
-                .do_rpc_call("path/to/resource", "get", None, None)
+                .do_rpc_call("path/to/resource", "get", None, None, None)
                 .expect("RpcCall command send");
 
             let req = conn_mock.expect_send_message().await;
@@ -843,7 +843,7 @@ mod tests {
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
             let mut resp_rx = cli_cmd_tx
-                .do_rpc_call("path/to/resource", "get", None, Some(Duration::from_millis(100)))
+                .do_rpc_call("path/to/resource", "get", None, Some(Duration::from_millis(100)), None)
                 .expect("RpcCall command send");
 
             let _req = conn_mock.expect_send_message().await;
@@ -861,7 +861,7 @@ mod tests {
         ) {
             let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
             let mut resp_rx = cli_cmd_tx
-                .do_rpc_call("path/to/resource", "get", None, Some(Duration::from_millis(100)))
+                .do_rpc_call("path/to/resource", "get", None, Some(Duration::from_millis(100)), None)
                 .expect("RpcCall command send");
 
             let req = conn_mock.expect_send_message().await;
@@ -903,7 +903,7 @@ mod tests {
             mut _cli_evt_rx: ClientEventsReceiver,
         ) {
             let mut resp_rx = cli_cmd_tx
-                .do_rpc_call("path/to/resource", "get", None, None)
+                .do_rpc_call("path/to/resource", "get", None, None, None)
                 .expect("RpcCall command send");
             receive_rpc_msg(&mut resp_rx).timeout(Duration::from_millis(1000)).await.expect_err("Unexpected method call response");
         }
