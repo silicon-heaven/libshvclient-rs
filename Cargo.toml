@@ -3,7 +3,7 @@ name = "shvclient"
 description = "A Rust framework for Silicon Heaven RPC devices"
 license = "MIT"
 repository = "https://github.com/silicon-heaven/libshvclient-rs"
-version = "7.0.3"
+version = "8.0.0"
 edition = "2024"
 
 [lib]
@@ -36,7 +36,7 @@ anyhow = "1.0.100"
 
 [dependencies]
 shvproto = "6.0.1"
-shvrpc = "17.0"
+shvrpc = "18.0"
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
