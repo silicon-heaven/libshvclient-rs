@@ -28,7 +28,7 @@ path = "tests/ssl.rs"
 clap = { version = "4.4", features = ["derive"] }
 simple_logger = { version = "5.0.0", features = ["stderr"] }
 generics-alias = { git = "https://github.com/j4r0u53k/generics-alias-rs.git", branch = "main" }
-shvbroker = "=3.31.6"
+shvbroker = "=3.31.7"
 rcgen = "0.14.5"
 tempfile = "3.23.0"
 smol = "2.0.2"
