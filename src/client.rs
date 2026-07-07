@@ -1441,17 +1441,17 @@ mod tests {
                 let mut request = RpcMessage::new_request("static", "set");
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, &request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
 
                 let mut request = RpcMessage::new_request("dynamic/sync", "set");
                 request.set_access_level(AccessLevel::Read);
                 let response = recv_request_get_response(&mut conn_mock, &request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
 
                 let mut request = RpcMessage::new_request("dynamic/async", "get");
                 request.set_access_level(AccessLevel::Browse);
                 let response = recv_request_get_response(&mut conn_mock, &request).await;
-                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::MethodNotFound.into());
+                assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
             }
         }
     }

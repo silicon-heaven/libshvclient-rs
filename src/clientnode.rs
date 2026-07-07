@@ -479,22 +479,21 @@ fn check_request_access_for_method(rq: &RpcMessage, mount_path: impl AsRef<str>,
     if rq_level >= method.access as i32 {
         Ok(())
     } else {
-        // Send a neutral error message so an unauthorized user wouldn't even know
-        // that this path:method exists.
         let path = full_shv_path(mount_path.as_ref(), rq.shv_path().unwrap_or_default());
-        Err(rpc_error_unknown_method_on_path(path, &method.name))
+        let access = method.access;
+        let method = &method.name;
 
-        // Err(RpcError::new(
-        //         RpcErrorCode::PermissionDenied,
-        //         format!("Insufficient permissions. \
-        //             Method '{full_path}:{method}()' \
-        //             called with access level {:?}, required {} ({:?})",
-        //             rq_level,
-        //             method.access as i32,
-        //             method.access,
-        //         )
-        // )
-        // )
+        Err(RpcError::new(
+                RpcErrorCode::PermissionDenied,
+                format!("Insufficient permissions. \
+                    Method '{path}:{method}()' \
+                    called with access level {:?}, required {} ({:?})",
+                    rq_level,
+                    access as i32,
+                    access,
+                )
+        )
+        )
     }
 }
 
@@ -677,7 +676,7 @@ mod tests {
             let Err(err) = res else {
                 panic!("Result should be an error");
             };
-            assert_eq!(err.code, RpcErrorCode::MethodNotFound.into());
+            assert_eq!(err.code, RpcErrorCode::PermissionDenied.into());
 
             // echo: Invalid param
             let res = node_handler.process_request(
