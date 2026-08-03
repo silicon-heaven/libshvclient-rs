@@ -10,6 +10,7 @@ use shvproto::RpcValue;
 const METH_SHV_VERSION_MAJOR: &str = "shvVersionMajor";
 const METH_SHV_VERSION_MINOR: &str = "shvVersionMinor";
 const METH_NAME: &str = "name";
+const METH_DATE: &str = "date";
 const METH_VERSION: &str = "version";
 const METH_SERIAL_NUMBER: &str = "serialNumber";
 
@@ -37,6 +38,15 @@ pub const DOT_APP_METHODS: &[MetaMethod] = &[
     ),
     MetaMethod::new_static(
         METH_NAME,
+        Flags::IsGetter,
+        AccessLevel::Browse,
+        "",
+        "",
+        &[],
+        "",
+    ),
+    MetaMethod::new_static(
+        METH_DATE,
         Flags::IsGetter,
         AccessLevel::Browse,
         "",
@@ -86,6 +96,7 @@ impl StaticNode for DotAppNode {
             Some(METH_SHV_VERSION_MAJOR) => Ok(self.shv_version_major.into()),
             Some(METH_SHV_VERSION_MINOR) => Ok(self.shv_version_minor.into()),
             Some(METH_NAME) => Ok(RpcValue::from(&self.app_name)),
+            Some(METH_DATE) => Ok(shvproto::DateTime::now().into()),
             Some(METH_PING) => Ok(().into()),
             _ => Err(err_method_not_found()),
         })
