@@ -671,7 +671,7 @@ mod tests {
         use async_trait::async_trait;
         use futures_time::future::FutureExt;
         use futures_time::time::Duration;
-        use shvproto::RpcValue;
+        use shvproto::{DateTime, RpcValue};
         use crate::clientnode::{RequestHandlerResult, PROPERTY_METHODS, SIG_CHNG};
         use shvrpc::metamethod::{AccessLevel, MetaMethod};
 
@@ -1454,6 +1454,28 @@ mod tests {
                 assert_eq!(response.response().expect_err("Response should be Err").code, RpcErrorCode::PermissionDenied.into());
             }
         }
+
+        pub(super) async fn app_date(
+            conn_evt_tx: Sender<ConnectionEvent>,
+            _cli_cmd_tx: ClientCommandSender,
+            mut cli_evt_rx: ClientEventsReceiver,
+        ) {
+            let mut conn_mock = init_connection(&conn_evt_tx, &mut cli_evt_rx, SHV_API_VERSION_DEFAULT).await;
+
+            let mut request = RpcMessage::new_request(".app", "date");
+            request.set_access_level(AccessLevel::Browse);
+            let response = recv_request_get_response(&mut conn_mock, &request).await;
+
+            let result = response
+                .response()
+                .expect("Response should be Ok")
+                .success()
+                .expect("Expected a success response");
+            let date = result.as_datetime();
+            let now = DateTime::now();
+            assert!(date >= now.add_seconds(-5), "The date should be close to the current time");
+            assert!(date <= now.add_seconds(5), "The date should be close to the current time");
+        }
     }
 
     macro_rules! def_test{
@@ -1547,6 +1569,7 @@ mod tests {
         subscribe_and_unsubscribe_v3,
         send_notifications_only_for_confirmed_subscriptions,
         handle_method_calls (make_client_with_handlers()),
+        app_date,
     }
 
 }
