@@ -35,7 +35,7 @@ smol = "2.0.2"
 anyhow = "1.0.100"
 
 [dependencies]
-shvproto = "6.0.1"
+shvproto = "6.3.3"
 shvrpc = "19.0"
 futures = "0.3.29"
 futures-time = "3.0.0"

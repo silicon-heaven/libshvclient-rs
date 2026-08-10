@@ -1472,9 +1472,9 @@ mod tests {
                 .success()
                 .expect("Expected a success response");
             let date = result.as_datetime();
-            let now = DateTime::now();
-            assert!(date >= now.add_seconds(-5), "The date should be close to the current time");
-            assert!(date <= now.add_seconds(5), "The date should be close to the current time");
+            let now = DateTime::now().expect("Date mustn't overflow");
+            assert!(date >= now.add_seconds(-5).expect("Date mustn't overflow"), "The date should be close to the current time");
+            assert!(date <= now.add_seconds(5).expect("Date mustn't overflow"), "The date should be close to the current time");
         }
     }
 
