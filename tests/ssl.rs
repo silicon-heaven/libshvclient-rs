@@ -21,7 +21,10 @@ async fn start_broker(broker_config: BrokerConfig, broker_address: &str) {
     let broker_config = Arc::new(broker_config);
     let (sender, reciever) = unbounded();
     shvclient::runtime::spawn_task(async {
-        run_broker(BrokerImpl::new(broker_config, access_config, LastLogin::default(), Policies::default(), sender, None), reciever)
+        let executor: Arc<smol::Executor<'static>> = Arc::default();
+        let (_exit_sender, exit_receiver) = futures_channel::oneshot::channel();
+        let broker = run_broker(BrokerImpl::new(broker_config, access_config, LastLogin::default(), Policies::default(), sender, None, executor.clone()), reciever, exit_receiver, executor.clone());
+        executor.run(broker)
             .await
             .expect("broker accept_loop failed");
     }).detach();
@@ -146,7 +149,7 @@ fn ssl() {
             .exec_full(&client_cmd)
             .await;
         info!(".app:dir:\n{res:?}");
-        assert!(!res.unwrap().is_empty());
+        assert_eq!(res.unwrap().len(), 7);
 
         let res = RpcCallDirExists::new(".broker/currentClient", "subscriptions")
             .timeout(Duration::from_secs(3))
