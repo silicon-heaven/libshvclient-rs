@@ -37,7 +37,7 @@ futures-channel = "0.3.34"
 
 [dependencies]
 shvproto = "8.0.0"
-shvrpc = "20.0"
+shvrpc = "21.0"
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
