@@ -3,7 +3,7 @@ name = "shvclient"
 description = "A Rust framework for Silicon Heaven RPC devices"
 license = "MIT"
 repository = "https://github.com/silicon-heaven/libshvclient-rs"
-version = "11.0.3"
+version = "12.0.0"
 edition = "2024"
 
 [lib]
@@ -35,9 +35,13 @@ smol = "2.0.2"
 anyhow = "1.0.100"
 futures-channel = "0.3.34"
 
+# NOTE: macro_magic needs to be here as a direct dependency because some functions from
+# there are called in expansion of `generics_inner` macro from generics-alias crate.
+macro_magic = "0.6.0"
+
 [dependencies]
 shvproto = "8.0.0"
-shvrpc = "21.0"
+shvrpc = "22.0"
 futures = "0.3.29"
 futures-time = "3.0.0"
 url = "2.4.1"
@@ -47,10 +51,6 @@ async-broadcast = "0.7.1"
 tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "time"], optional = true }
 tokio-util = { version = "0.7.10", features = ["compat"], optional = true }
 smol = { version = "2.0.2", optional = true }
-
-# NOTE: macro_magic needs to be here as a direct dependency because some functions from
-# there are called in expansion of `generics_inner` macro from generics-alias crate.
-macro_magic = "0.6.0"
 
 futures-rustls = "0.26.0"
 rustls-pemfile = "2.2.0"
