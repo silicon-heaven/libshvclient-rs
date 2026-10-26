@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ["tokio", "smol"]
+        feature: ["tokio mocking", "smol mocking"]
         toolchain: [stable, nightly]
     runs-on: ubuntu-latest
     steps:
@@ -35,11 +35,11 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           override: true
       - name: Clippy (${{ matrix.feature }})
-        run: cargo clippy --all-targets --features ${{ matrix.feature }}
+        run: cargo clippy --all-targets --features '${{ matrix.feature }}'
       - name: Build (${{ matrix.feature }})
-        run: cargo build --all-targets --features ${{ matrix.feature }}
+        run: cargo build --all-targets --features '${{ matrix.feature }}'
       - name: Run tests (${{ matrix.feature }})
-        run: cargo test --all-targets --features ${{ matrix.feature }}
+        run: cargo test --all-targets --features '${{ matrix.feature }}'
 
   coverage:
     name: Code coverage
@@ -53,7 +53,7 @@ jobs:
         uses: silicon-heaven/rust-pycobertura-action@v4.1.0
         with:
           project_name: libshvrpc
-          cargo_test_arguments: --features smol
+          cargo_test_arguments: --features 'smol mocking'
 
   check-version-bump:
     name: Check version bump
