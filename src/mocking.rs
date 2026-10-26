@@ -124,10 +124,10 @@ impl TestApp {
 
     pub async fn await_signal(
         &self,
-        expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>,
+        expected_ri: &str,
         expected_param: impl ParamMatcher,
     ) {
-        let expected_ri = expected_ri.try_into().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
+        let expected_ri: ShvRI = expected_ri.parse().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
         let expected_signal = expected_ri.signal().unwrap_or_else(|| panic!("Signal RI must have a signal: {expected_ri}"));
 
         self.await_and_remove(|rpc_message| {
@@ -146,10 +146,10 @@ impl TestApp {
 
     pub async fn await_request(
         &self,
-        expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>,
+        expected_ri: &str,
         expected_param: impl ParamMatcher,
     ) -> PendingRequest {
-        let expected_ri = expected_ri.try_into().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
+        let expected_ri: ShvRI = expected_ri.parse().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
 
         let rpc_message = self.await_and_remove(|rpc_message| {
             if !rpc_message.is_request() {
@@ -170,8 +170,8 @@ impl TestApp {
         )
     }
 
-    pub async fn await_subscription(&self, expected_ri: impl TryInto<ShvRI, Error = impl std::fmt::Display>) {
-        let expected_ri = expected_ri.try_into().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
+    pub async fn await_subscription(&self, expected_ri: &str) {
+        let expected_ri: ShvRI = expected_ri.parse().unwrap_or_else(|err| panic!("Invalid RI: {err}"));
         let expected_ri = expected_ri.as_str();
         self.await_request(".broker/currentClient:subscribe", format!(r#"["{expected_ri}",null]""#).as_str()).await
             .respond(Ok("true"));
